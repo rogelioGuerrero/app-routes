@@ -1,0 +1,85 @@
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+class Location(BaseModel):
+    id: int
+    name: Optional[str] = None
+    lat: float
+    lon: float
+    weight: Optional[float] = None
+    volume: Optional[float] = None
+    time_window_start: Optional[int] = None  # minutos desde medianoche
+    time_window_end: Optional[int] = None
+    priority: Optional[int] = None
+
+class Vehicle(BaseModel):
+    id: int
+    start_lat: float
+    start_lon: float
+    end_lat: Optional[float] = None
+    end_lon: Optional[float] = None
+    capacity_weight: Optional[float] = None
+    capacity_volume: Optional[float] = None
+    capacity_quantity: Optional[int] = None
+    start_time: Optional[int] = None
+    end_time: Optional[int] = None
+    use_quantity: Optional[bool] = False
+    use_weight: Optional[bool] = False
+    use_volume: Optional[bool] = False
+
+class RouteOptimizationRequest(BaseModel):
+    locations: List[Location]
+    vehicles: Optional[List[Vehicle]] = None
+    optimize_waypoints: bool = True  # Si es True, Google optimiza el orden; si False, respeta el orden dado.
+    max_weight: Optional[float] = None
+    max_volume: Optional[float] = None
+    max_quantity: Optional[int] = None
+    use_time_windows: Optional[bool] = False
+    use_quantity: Optional[bool] = False
+    use_weight: Optional[bool] = False
+    use_volume: Optional[bool] = False
+
+class RouteOptimizationResponse(BaseModel):
+    route: List[List[int]]  # IDs de locations por vehículo
+    total_distance: float  # en kilómetros
+    geojson: Optional[dict] = None
+    total_duration: Optional[float] = None  # en minutos u opcional
+    details: Optional[str] = None
+
+# Modelos para el endpoint vrp-capacity
+class AdvancedLocation(BaseModel):
+    id: int
+    name: Optional[str] = None
+    lat: float
+    lon: float
+    demand: Optional[int] = 0
+    weight: Optional[float] = 0.0
+    volume: Optional[float] = 0.0
+    time_window: Optional[List[int]] = None
+
+class VRPCapacityRequest(BaseModel):
+    locations: List[AdvancedLocation]
+    # Jornada laboral en minutos desde medianoche (ej: 420 = 07:00, 1080 = 18:00). Si no se envía, se usan los valores por defecto 07:00-18:00.
+    workday_start: Optional[int] = None
+    workday_end: Optional[int] = None
+    num_vehicles: int = 1
+    depot: int = 0
+    vehicle_capacities_quantity: Optional[List[int]] = None
+    vehicle_capacities_weight: Optional[List[float]] = None
+    vehicle_capacities_volume: Optional[List[float]] = None
+    mode: Optional[str] = "driving"
+    units: Optional[str] = "metric"
+    use_time_windows: Optional[bool] = False
+    use_quantity: Optional[bool] = False
+    use_weight: Optional[bool] = False
+    use_volume: Optional[bool] = False
+
+class VRPAdvancedResponse(BaseModel):
+    routes: List[List[int]]
+    total_distance: float
+    details: Optional[List[str]] = None
+    arrival_times: Optional[List[List[int]]] = None
+    arrival_times_formatted: Optional[List[List[str]]] = None
+    warnings: Optional[List[str]] = None
+    route_polylines: Optional[List[str]] = None
+    route_geojson: Optional[List[dict]] = None

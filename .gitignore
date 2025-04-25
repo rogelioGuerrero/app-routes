@@ -1,0 +1,21 @@
+.qodo
+# Ignorar archivos markdown
+*.md
+*.html
+*.geojson
+*.json  
+
+# Ignorar entorno virtual de Python
+venv/
+.env
+__pycache__/
+*.pyc
+
+# Ignorar archivos temporales y de sistema
+.DS_Store
+Thumbs.db
+*.log
+
+# Ignorar archivos de configuración de IDE
+.vscode/
+.idea/
