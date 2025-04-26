@@ -4,10 +4,16 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-def get_route_polyline_and_geojson(latlons, api_key=None):
+def get_route_polyline_and_geojson(latlons, api_key=None, rdp_tolerance=0.0001):
     """
     Dado un listado de (lat, lon), retorna el polyline y el GeoJSON de la ruta realista usando Google Directions.
+    Aplica compresión Ramer-Douglas-Peucker (rdp) a los puntos decodificados (tolerancia por defecto: 0.0001 ≈ 10m).
     """
+    import numpy as np
+    try:
+        from rdp import rdp
+    except ImportError:
+        rdp = None
     if not api_key:
         api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
@@ -35,6 +41,14 @@ def get_route_polyline_and_geojson(latlons, api_key=None):
     polyline = data["routes"][0]["overview_polyline"]["points"]
     # GeoJSON (decodificado)
     points = decode_google_polyline(polyline)
+    # Aplica RDP si está disponible
+    if rdp is not None and len(points) > 2:
+        try:
+            arr = np.array(points)
+            points_rdp = rdp(arr, epsilon=rdp_tolerance)
+            points = [tuple(pt) for pt in points_rdp]
+        except Exception:
+            pass  # Si falla, usa los puntos originales
     geojson = {
         "type": "LineString",
         "coordinates": [[lon, lat] for lat, lon in points]
