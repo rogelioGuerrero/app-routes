@@ -130,7 +130,7 @@ def vrp_advanced(request: VRPAdvancedRequest):
             if request.use_time_windows:
                 time_dimension = routing.GetDimensionOrDie('Time')
                 arrival = solution.Min(time_dimension.CumulVar(previous_index))
-                details.append(f"Nodo {node}: llegada a {arrival//60} min")
+                details.append(f"Parada: Punto {node} | Hora de llegada {min_to_hhmm(arrival//60)}")
             if request.use_demands:
                 details.append(f"Nodo {node}: demanda {demands[node]}")
         route.append(manager.IndexToNode(index))

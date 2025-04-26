@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador VRP-Skills El Salvador</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <style>
+        #map { height: 500px; }
+        body { font-family: 'Inter', sans-serif; }
+        .leaflet-marker-icon { background-color: rgba(255, 255, 255, 0.8); border-radius: 50%; }
+        .depot-icon-text { font-weight: bold; color: black; text-shadow: 1px 1px 2px white; }
+        .customer-icon-text { color: blue; text-shadow: 1px 1px 2px white; }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-gray-100 p-4 md:p-8 font-sans">
+
+<div class="container mx-auto bg-white p-6 rounded-lg shadow-lg">
+    <h1 class="text-2xl md:text-3xl font-bold mb-6 text-center text-blue-700">Simulador VRP-Skills (El Salvador)</h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div class="md:col-span-1 space-y-4">
+            <div>
+                <label for="scenario-select" class="block text-sm font-medium text-gray-700 mb-1">Seleccionar Escenario:</label>
+                <select id="scenario-select" class="mt-1 block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm">
+    <option value="basic_cvrp">1. Optimiza tus entregas según tu capacidad.</option>
+    <option value="time_windows">2. Planifica tus entregas con restricciones horarias.</option>
+    <option value="skills">3. Elige el vehículo y repartidor adecuado según tus clientes.</option>
+    <option value="pickup_delivery">4. Rutas complejas: recoge, entrega y cumple requisitos de tus clientes.</option>
+</select>
+            </div>
+
+            <div>
+                <div id="scenario-description" class="bg-blue-50 border border-blue-200 text-blue-800 rounded-md p-3 mb-3 text-sm"></div>
+                <button id="optimize-button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-md shadow transition duration-150 ease-in-out">
+                    Simular Optimización
+                </button>
+            </div>
+
+            <div>
+                <details id="json-details">
+                    <summary class="cursor-pointer text-lg font-semibold mb-2 text-gray-800 select-none">Entrada JSON <span id="json-toggle-icon"></span></summary>
+                    <pre id="json-input" class="bg-gray-50 p-3 rounded-md text-xs overflow-auto h-64 border border-gray-200"></pre>
+                </details>
+            </div>
+
+            <div>
+                <h3 class="text-lg font-semibold mb-2 text-gray-800">Resultado:</h3>
+                <div id="results-output" class="bg-green-50 p-3 rounded-md text-sm border border-green-200 h-24 overflow-auto">
+                    Seleccione un escenario y presione "Simular Optimización".
+                </div>
+            </div>
+        </div>
+
+        <div class="md:col-span-2">
+            <h3 class="text-lg font-semibold mb-2 text-gray-800 text-center">Mapa de Rutas</h3>
+            <div id="map" class="w-full rounded-lg shadow border border-gray-300"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+const routeColors = ['#3b82f6', '#16a34a', '#ef4444', '#eab308', '#a855f7', '#f97316', '#14b8a6', '#6366f1', '#f43f5e', '#84cc16'];
+const defaultCoords = [13.6929, -89.2182]; // San Salvador centro
+
+// 10 puntos/lugares de El Salvador, con coordenadas reales
+const lugaresSV = [
+    { id: 0, name: "Depósito - San Salvador", lat: 13.6929, lon: -89.2182 },
+    { id: 1, name: "Santa Tecla", lat: 13.6731, lon: -89.2797 },
+    { id: 2, name: "Soyapango", lat: 13.7102, lon: -89.1399 },
+    { id: 3, name: "Mejicanos", lat: 13.7405, lon: -89.2137 },
+    { id: 4, name: "Apopa", lat: 13.8017, lon: -89.1792 },
+    { id: 5, name: "Ilopango", lat: 13.7017, lon: -89.1185 },
+    { id: 6, name: "San Marcos", lat: 13.6394, lon: -89.2036 },
+    { id: 7, name: "Ciudad Delgado", lat: 13.7307, lon: -89.1638 },
+    { id: 8, name: "Cuscatancingo", lat: 13.7364, lon: -89.2071 },
+    { id: 9, name: "Ayutuxtepeque", lat: 13.7486, lon: -89.2136 }
+];
+
+// Skills ejemplo
+const allSkills = ["frío", "frágil", "urgente", "voluminoso"];
+
+// Descripciones narrativas por escenario
+const scenarioDescriptions = {
+    basic_cvrp: `Este escenario simula el clásico problema de rutas de vehículos donde un solo camión debe entregar productos a varios clientes, respetando la capacidad máxima de carga. Ideal para entender cómo optimizar repartos cuando el principal límite es el espacio o peso del vehículo.`,
+    time_windows: `Aquí, además de la capacidad del vehículo, cada cliente solo puede recibir entregas dentro de un horario específico. El reto es planificar rutas que no solo sean eficientes, sino que también lleguen a tiempo a cada destino. Perfecto para servicios con horarios de atención o entregas urgentes.`,
+    skills: `En este caso, cada vehículo y cada cliente pueden tener habilidades o requerimientos especiales (por ejemplo, transporte refrigerado, manejo de productos frágiles, etc.). El simulador asigna los vehículos correctos a cada cliente según las habilidades necesarias. Es ideal para flotas especializadas o productos con requisitos particulares.`,
+    pickup_delivery: `Este es el escenario más avanzado: algunos puntos requieren recoger productos y llevarlos a otro destino, considerando tanto las habilidades de los vehículos como los horarios de entrega y recogida. Representa situaciones reales como mudanzas, logística inversa o entregas con requisitos complejos.`
+};
+
+// Escenarios
+const scenarios = {
+    basic_cvrp: {
+        description: "Un vehículo parte del depósito para entregar a 9 clientes, respetando solo la capacidad.",
+        input: {
+            locations: lugaresSV.map((loc, i) => ({
+                ...loc,
+                demand: i === 0 ? 0 : [2, 3, 1, 4, 2, 5, 2, 3, 2][i-1], // demandas variadas
+                weight: i === 0 ? 0 : [10, 8, 6, 12, 9, 7, 5, 11, 8][i-1],
+                volume: i === 0 ? 0 : [1, 2, 1.5, 2.5, 1, 3, 2, 1, 1.5][i-1],
+                time_window: null,
+                required_skills: []
+            })),
+            vehicles: [
+                {
+                    id: 0,
+                    start_lat: lugaresSV[0].lat,
+                    start_lon: lugaresSV[0].lon,
+                    end_lat: lugaresSV[0].lat,
+                    end_lon: lugaresSV[0].lon,
+                    provided_skills: [],
+                    capacity_weight: 60,
+                    capacity_volume: 12,
+                    capacity_quantity: 20,
+                    use_quantity: true,
+                    use_weight: true,
+                    use_volume: true,
+                    start_time: 420, // 7:00
+                    end_time: 1080  // 18:00
+                }
+            ],
+            num_vehicles: 1,
+            depot: 0,
+            mode: "driving",
+            units: "metric"
+        }
+    },
+    time_windows: {
+        description: "Un vehículo con capacidad y ventanas horarias para cada cliente.",
+        input: {
+            locations: lugaresSV.map((loc, i) => ({
+                ...loc,
+                demand: i === 0 ? 0 : 2 + i % 3,
+                weight: i === 0 ? 0 : 7 + i % 5,
+                volume: i === 0 ? 0 : 1 + (i % 2) * 1.5,
+                time_window: i === 0 ? [420, 1080] : [480 + i*30, 600 + i*35], // ventanas escalonadas
+                required_skills: []
+            })),
+            vehicles: [
+                {
+                    id: 0,
+                    start_lat: lugaresSV[0].lat,
+                    start_lon: lugaresSV[0].lon,
+                    end_lat: lugaresSV[0].lat,
+                    end_lon: lugaresSV[0].lon,
+                    provided_skills: [],
+                    capacity_weight: 55,
+                    capacity_volume: 10,
+                    capacity_quantity: 18,
+                    use_quantity: true,
+                    use_weight: true,
+                    use_volume: true,
+                    start_time: 420, // 7:00
+                    end_time: 1080  // 18:00
+                }
+            ],
+            num_vehicles: 1,
+            depot: 0,
+            mode: "driving",
+            units: "metric"
+        }
+    },
+    fixedResponse: {
+      routes: [[0, 7, 4, 3, 8, 0], [0, 1, 6, 2, 5, 9, 0]],
+      total_distance: 114.91,
+      total_distance_unit: 'km',
+      details: [
+        "Vehículo 1: [0, 7, 4, 3, 8, 0] | Distancia: 45.12 km Stop 1: Nodo 7 llegada 07:28 espera 192min servicio 5min inicia 10:40 sale 10:45 Stop 2: Nodo 4 llegada 11:08 espera 0min servicio 5min inicia 11:08 sale 11:13 Stop 3: Nodo 3 llegada 11:36 espera 0min servicio 5min inicia 11:36 sale 11:41 Stop 4: Nodo 8 llegada 11:44 espera 0min servicio 5min inicia 11:44 sale 11:49",
+        "Vehículo 2: [0, 1, 6, 2, 5, 9, 0] | Distancia: 69.79 km Stop 1: Nodo 1 llegada 07:14 espera 86min servicio 5min inicia 08:40 sale 08:45 Stop 2: Nodo 6 llegada 09:09 espera 71min servicio 5min inicia 10:20 sale 10:25 Stop 3: Nodo 2 llegada 11:02 espera 0min servicio 5min inicia 11:02 sale 11:07 Stop 4: Nodo 5 llegada 11:20 espera 0min servicio 5min inicia 11:20 sale 11:25 Stop 5: Nodo 9 llegada 12:06 espera 0min servicio 5min inicia 12:06 sale 12:11"
+      ],
+      arrival_times_formatted: [
+        ["10:40", "11:08", "11:36", "11:44"],
+        ["08:40", "10:20", "11:02", "11:20", "12:06"]
+      ]
+    },
+    skills: {
+        description: "Dos vehículos con skills distintas. Algunos clientes requieren skills.",
+        input: {
+            locations: lugaresSV.map((loc, i) => ({
+                ...loc,
+                demand: i === 0 ? 0 : 1 + (i % 3),
+                weight: i === 0 ? 0 : 8 + (i % 4),
+                volume: i === 0 ? 0 : 1 + (i % 2),
+                time_window: null,
+                required_skills: i === 0 ? [] : [allSkills[i % allSkills.length]]
+            })),
+            vehicles: [
+                {
+                    id: 0,
+                    start_lat: lugaresSV[0].lat,
+                    start_lon: lugaresSV[0].lon,
+                    end_lat: lugaresSV[0].lat,
+                    end_lon: lugaresSV[0].lon,
+                    provided_skills: ["frío", "urgente"],
+                    capacity_weight: 40,
+                    capacity_volume: 8,
+                    capacity_quantity: 10,
+                    use_quantity: true,
+                    use_weight: true,
+                    use_volume: true,
+                    start_time: 420,
+                    end_time: 1080
+                },
+                {
+                    id: 1,
+                    start_lat: lugaresSV[0].lat,
+                    start_lon: lugaresSV[0].lon,
+                    end_lat: lugaresSV[0].lat,
+                    end_lon: lugaresSV[0].lon,
+                    provided_skills: ["frágil", "voluminoso"],
+                    capacity_weight: 50,
+                    capacity_volume: 10,
+                    capacity_quantity: 12,
+                    use_quantity: true,
+                    use_weight: true,
+                    use_volume: true,
+                    start_time: 420,
+                    end_time: 1080
+                }
+            ],
+            num_vehicles: 2,
+            depot: 0,
+            mode: "driving",
+            units: "metric"
+        }
+    },
+    pickup_delivery: {
+        description: "Dos vehículos, algunos puntos son pickup y otros delivery, con skills y ventanas horarias.",
+        input: {
+            locations: lugaresSV.map((loc, i) => ({
+                ...loc,
+                demand: i === 0 ? 0 : (i % 2 === 0 ? -2 : 2), // alterna pickup (-) y delivery (+)
+                weight: i === 0 ? 0 : 6 + (i % 5),
+                volume: i === 0 ? 0 : 1 + (i % 3),
+                time_window: i === 0 ? [420, 1080] : [500 + i*20, 700 + i*25],
+                required_skills: i === 0 ? [] : [allSkills[(i+1) % allSkills.length]]
+            })),
+            vehicles: [
+                {
+                    id: 0,
+                    start_lat: lugaresSV[0].lat,
+                    start_lon: lugaresSV[0].lon,
+                    end_lat: lugaresSV[0].lat,
+                    end_lon: lugaresSV[0].lon,
+                    provided_skills: ["frío", "frágil"],
+                    capacity_weight: 30,
+                    capacity_volume: 7,
+                    capacity_quantity: 8,
+                    use_quantity: true,
+                    use_weight: true,
+                    use_volume: true,
+                    start_time: 420,
+                    end_time: 1080
+                },
+                {
+                    id: 1,
+                    start_lat: lugaresSV[0].lat,
+                    start_lon: lugaresSV[0].lon,
+                    end_lat: lugaresSV[0].lat,
+                    end_lon: lugaresSV[0].lon,
+                    provided_skills: ["urgente", "voluminoso"],
+                    capacity_weight: 35,
+                    capacity_volume: 8,
+                    capacity_quantity: 9,
+                    use_quantity: true,
+                    use_weight: true,
+                    use_volume: true,
+                    start_time: 420,
+                    end_time: 1080
+                }
+            ],
+            num_vehicles: 2,
+            depot: 0,
+            mode: "driving",
+            units: "metric"
+        }
+    }
+};
+
+let map;
+let currentMarkers = [];
+let currentRoutes = [];
+
+function clearMap() {
+    currentMarkers.forEach(marker => map.removeLayer(marker));
+    currentMarkers = [];
+    currentRoutes.forEach(route => map.removeLayer(route));
+    currentRoutes = [];
+}
+
+function drawMarkers(locations, depotId) {
+    if (!map) return;
+    clearMap();
+    const bounds = [];
+    locations.forEach(loc => {
+        const isDepot = loc.id === depotId;
+        const markerColor = isDepot ? 'red' : 'blue';
+        const iconHtml = `<div style="text-align: center;">
+            <svg height="20" width="20" viewbox="0 0 20 20" style="fill:${markerColor}; stroke: black; stroke-width: 1px;">
+                <circle cx="10" cy="10" r="8"/>
+            </svg>
+            <span class="${isDepot ? 'depot-icon-text' : 'customer-icon-text'}" style="font-size:10px; position:relative; top:-5px;">${isDepot ? 'D' : loc.id}</span>
+        </div>`;
+        const customIcon = L.divIcon({
+            html: iconHtml,
+            className: '',
+            iconSize: [20, 20],
+            iconAnchor: [10, 20],
+            popupAnchor: [0, -20]
+        });
+        const formatTime = (min) => {
+            const h = Math.floor(min / 60).toString().padStart(2, '0');
+            const m = (min % 60).toString().padStart(2, '0');
+            return `${h}:${m}`;
+        };
+        let popup = `<b>${loc.name} (ID: ${loc.id})</b><br>`;
+        popup += `Paquetes: ${loc.demand || 0}`;
+        if (loc.time_window && Array.isArray(loc.time_window) && loc.time_window.length === 2) {
+            popup += `<br>Horario: <span style="color:#2563eb;font-weight:bold">${formatTime(loc.time_window[0])}-${formatTime(loc.time_window[1])}</span>`;
+        }
+        if (loc.required_skills && loc.required_skills.length > 0) {
+            popup += `<br>Criterio: ${loc.required_skills.join(', ')}`;
+        }
+        const marker = L.marker([loc.lat, loc.lon], {icon: customIcon})
+            .addTo(map)
+            .bindPopup(popup);
+        currentMarkers.push(marker);
+        bounds.push([loc.lat, loc.lon]);
+    });
+    if (bounds.length > 0) {
+        map.fitBounds(bounds, { padding: [50, 50] });
+    } else {
+        map.setView(defaultCoords, 12);
+    }
+}
+
+// Dibuja rutas realistas (usando polylines o geojson si están disponibles)
+function drawRoutes(data, locations) {
+    if (!map) return;
+    currentRoutes.forEach(route => map.removeLayer(route));
+    currentRoutes = [];
+    // Si hay polylines (Google encoded), decodifica y dibuja
+    if (data.route_polylines && Array.isArray(data.route_polylines)) {
+        data.route_polylines.forEach((poly, idx) => {
+            const latlngs = decodeGooglePolyline(poly);
+            if (latlngs.length > 1) {
+                const polyline = L.polyline(latlngs, {
+                    color: routeColors[idx % routeColors.length],
+                    weight: 3,
+                    opacity: 0.85
+                }).addTo(map);
+                polyline.bindTooltip(`Vehículo ${idx + 1}`, {sticky: true});
+                currentRoutes.push(polyline);
+            }
+        });
+        return;
+    }
+    // Si hay geojson
+    if (data.route_geojson && Array.isArray(data.route_geojson)) {
+        data.route_geojson.forEach((geo, idx) => {
+            if (geo && geo.type === 'LineString' && Array.isArray(geo.coordinates)) {
+                // GeoJSON: [lon, lat] → Leaflet: [lat, lon]
+                const latlngs = geo.coordinates.map(([lon, lat]) => [lat, lon]);
+                if (latlngs.length > 1) {
+                    const polyline = L.polyline(latlngs, {
+                        color: routeColors[idx % routeColors.length],
+                        weight: 3,
+                        opacity: 0.85
+                    }).addTo(map);
+                    polyline.bindTooltip(`Vehículo ${idx + 1}`, {sticky: true});
+                    currentRoutes.push(polyline);
+                }
+            }
+        });
+        return;
+    }
+    // Si no, dibuja líneas rectas entre los puntos
+    const routesData = data.routes;
+    const locationMap = new Map(locations.map(loc => [loc.id, [loc.lat, loc.lon]]));
+    if (!routesData || !Array.isArray(routesData)) return;
+    routesData.forEach((route, idx) => {
+        const routePoints = route.map(stopId => locationMap.get(stopId)).filter(p => p);
+        if (routePoints.length > 1) {
+            const polyline = L.polyline(routePoints, {
+                color: routeColors[idx % routeColors.length],
+                weight: 3,
+                opacity: 0.7
+            }).addTo(map);
+            polyline.bindTooltip(`Vehículo ${idx + 1}: ${route.join(' → ')}`, {sticky: true});
+            currentRoutes.push(polyline);
+        }
+    });
+}
+
+// Decodifica Google Polyline a [[lat, lon], ...]
+function decodeGooglePolyline(polylineStr) {
+    let index = 0, lat = 0, lng = 0, coordinates = [];
+    while (index < polylineStr.length) {
+        let b, shift = 0, result = 0;
+        do {
+            b = polylineStr.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lat += dlat;
+        shift = 0; result = 0;
+        do {
+            b = polylineStr.charCodeAt(index++) - 63;
+            result |= (b & 0x1f) << shift;
+            shift += 5;
+        } while (b >= 0x20);
+        let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+        lng += dlng;
+        coordinates.push([lat / 1e5, lng / 1e5]);
+    }
+    return coordinates;
+}
+
+function loadScenario(scenarioId) {
+    const scenario = scenarios[scenarioId];
+    if (!scenario) return;
+    document.getElementById('json-input').textContent = JSON.stringify(scenario.input, null, 2);
+    document.getElementById('results-output').textContent = 'Listo para simular.';
+    document.getElementById('results-output').className = 'bg-gray-50 p-3 rounded-md text-sm border border-gray-200 h-24 overflow-auto';
+    drawMarkers(scenario.input.locations, scenario.input.depot);
+}
+
+async function simulateOptimization() {
+    const selectedId = document.getElementById('scenario-select').value;
+    const scenario = scenarios[selectedId];
+    if (!scenario) return;
+    document.getElementById('results-output').textContent = 'Procesando...';
+    document.getElementById('results-output').className = 'bg-yellow-50 p-3 rounded-md text-sm border border-yellow-200 h-24 overflow-auto text-yellow-700';
+
+    // Si hay respuesta fija, úsala y no llames a la API
+    if (scenario.fixedResponse) {
+        // Dibuja rutas si existen
+        drawRoutes(scenario.fixedResponse, scenario.input.locations);
+        mostrarResultadoNarrativo(scenario.fixedResponse, scenario);
+        return;
+    }
+
+    try {
+        const response = await fetch('https://app-routes.onrender.com/vrp-skills', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(scenario.input)
+        });
+        if (!response.ok) {
+            throw new Error(`Error HTTP: ${response.status}`);
+        }
+        const data = await response.json();
+
+        // Dibuja rutas si existen
+        drawRoutes(data, scenario.input.locations);
+        mostrarResultadoNarrativo(data, scenario);
+    } catch (error) {
+        document.getElementById('results-output').textContent = 'Error: ' + error.message;
+        document.getElementById('results-output').className = 'bg-red-50 p-3 rounded-md text-sm border border-red-200 h-24 overflow-auto text-red-700';
+    }
+}
+
+// Muestra el resultado con narrativa mejorada (puede usarse tanto para fixedResponse como para respuesta de API)
+function mostrarResultadoNarrativo(data, scenario) {
+    let msg = '';
+    const locations = scenario.input.locations;
+    // 1. Mostrar rutas por vehículo
+    if (data.routes && Array.isArray(data.routes)) {
+        data.routes.forEach((route, vIdx) => {
+            msg += `<b>Vehículo ${vIdx + 1}</b><br>Ruta: `;
+            msg += route.map(id => {
+                const loc = locations.find(l => l.id === id);
+                return loc ? loc.name : id;
+            }).join(' → ');
+            if (data.total_distance && Array.isArray(data.total_distance)) {
+                msg += ` <br>Distancia: ${data.total_distance[vIdx]?.toFixed(2) || '?'} km`;
+            }
+            msg += '<br>';
+            // Paradas detalladas
+            if (data.details && Array.isArray(data.details) && data.details[vIdx]) {
+                msg += data.details[vIdx].replace(/\n/g, '<br>');
+            }
+            // Horarios de llegada
+            if (data.arrival_times_formatted && Array.isArray(data.arrival_times_formatted) && data.arrival_times_formatted[vIdx]) {
+                msg += `<br>Horarios de llegada: ${data.arrival_times_formatted[vIdx].join(', ')}`;
+            }
+            msg += '<hr>';
+        });
+    }
+    // 2. Si no hay rutas, mostrar detalles planos
+    if (!msg && data.details) {
+        msg += Array.isArray(data.details) ? data.details.join('<br>') : data.details;
+    }
+    // 3. Distancia total global
+    if (data.total_distance && !Array.isArray(data.total_distance)) {
+        msg += `<br><b>Distancia total:</b> ${data.total_distance.toFixed(2)} km`;
+    }
+    if (!msg) msg = "Optimización realizada. Revisa el mapa.";
+    document.getElementById('results-output').innerHTML = msg;
+    document.getElementById('results-output').className = 'bg-green-50 p-3 rounded-md text-sm border border-green-200 h-24 overflow-auto text-green-700';
+}
+
+// --- Actualiza la descripción narrativa ---
+function updateScenarioDescription() {
+    const selectedId = document.getElementById('scenario-select').value;
+    const desc = scenarioDescriptions[selectedId] || '';
+    document.getElementById('scenario-description').innerHTML = desc;
+}
+
+// --- Colapsar área JSON ---
+document.addEventListener('DOMContentLoaded', () => {
+    const detailsEl = document.getElementById('json-details');
+    const iconEl = document.getElementById('json-toggle-icon');
+    if (detailsEl && iconEl) {
+        detailsEl.addEventListener('toggle', () => {
+            iconEl.textContent = detailsEl.open ? '▼' : '►';
+        });
+    }
+
+    map = L.map('map').setView(defaultCoords, 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    // Cargar escenario inicial
+    const initialScenarioId = document.getElementById('scenario-select').value;
+    loadScenario(initialScenarioId);
+    updateScenarioDescription();
+
+    // Listeners
+    document.getElementById('scenario-select').addEventListener('change', (event) => {
+        loadScenario(event.target.value);
+        updateScenarioDescription();
+    });
+
+    document.getElementById('optimize-button').addEventListener('click', simulateOptimization);
+});
+        </script>
+        
+        </body>
+        </html>

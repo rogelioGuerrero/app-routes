@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo - Optimización de Rutas Inteligente</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 0; background: #f6f8fa; }
+    .container { max-width: 900px; margin: 2rem auto; background: #fff; border-radius: 10px; box-shadow: 0 2px 8px #0001; padding: 2rem; }
+    h1 { color: #0b5394; }
+    #map { height: 400px; border-radius: 8px; margin-bottom: 2rem; }
+    .summary { background: #eaf6ff; padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; }
+    .vehiculo { margin-bottom: 1.5rem; }
+    .vehiculo-title { font-weight: bold; color: #0b5394; margin-bottom: 0.5rem; }
+    .punto { margin-left: 1.5rem; }
+    .benefits { background: #eaffea; padding: 1rem; border-radius: 8px; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h1>Demo: Optimización Inteligente de Rutas</h1>
+  <div class="summary">
+    <strong>Escenario:</strong> 2 vehículos de reparto, cada uno con capacidad máxima de <b>3 paquetes</b>. 4 clientes, cada uno con demanda de 1 paquete y <b>preferencias horarias</b> (ventanas de tiempo) para recibir su entrega. El sistema calcula la ruta óptima para cada vehículo, minimizando la distancia total y asegurando que todas las entregas se realicen en el horario preferido de cada cliente, respetando la capacidad de carga de cada vehículo.
+    <br/><strong>Distancia total recorrida:</strong> 14.55 km
+  </div>
+
+  <h2>Datos de entrada</h2>
+  <div style="margin-bottom:0.8em; font-size:1em;">
+    <b>Vehículos:</b> 2 unidades, cada una con capacidad máxima de <b>3 paquetes</b> por recorrido.<br>
+    <b>Clientes:</b> Cada cliente solicita 1 paquete y define su <b>preferencia horaria</b> para la entrega.
+  </div>
+  <table border="1" cellpadding="6" style="border-collapse:collapse; margin-bottom:1.5rem;">
+    <thead>
+      <tr style="background:#eaf6ff"><th>Nombre</th><th>Coordenadas</th><th>Ventana de tiempo</th><th>Demanda</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Depósito Central</td><td>13.7000, -89.2000</td><td>00:00 - 24:00</td><td>0</td></tr>
+      <tr><td>Cliente A</td><td>13.7020, -89.2100</td><td>08:00 - 10:00</td><td>1 paquete</td></tr>
+      <tr><td>Cliente B</td><td>13.7050, -89.2200</td><td>09:00 - 11:00</td><td>1 paquete</td></tr>
+      <tr><td>Cliente C</td><td>13.7100, -89.2300</td><td>10:00 - 13:00</td><td>1 paquete</td></tr>
+      <tr><td>Cliente D</td><td>13.7150, -89.2400</td><td>11:00 - 15:00</td><td>1 paquete</td></tr>
+    </tbody>
+  </table>
+  <div style="background:#fffbe6; border-left:4px solid #ffd700; padding:0.7em 1em; margin-bottom:1.5em; font-size:1em;">
+    <b>Nota sobre ventana de tiempo:</b> El horario indica cuándo el cliente está disponible para recibir la entrega o visita. El sistema garantiza que cada entrega se realice dentro del rango solicitado, optimizando la puntualidad y satisfacción.<br>
+    <b>Nota sobre demanda:</b> La demanda representa la cantidad a entregar en cada punto (pueden ser paquetes, cajas, pedidos, etc.). El sistema respeta la capacidad máxima de cada vehículo.
+  </div>
+
+  <div id="map"></div>
+
+  <h2>Detalle de rutas</h2>
+  <div class="vehiculo">
+    <div class="vehiculo-title">Vehículo 1</div>
+    <div class="punto">Depósito Central → Cliente B → Cliente C → Cliente D → Depósito Central</div>
+    <div style="color:#555; font-size:0.98em; margin-left:1.5em;">Distancia recorrida: <b>11.67 km</b></div>
+  </div>
+  <div class="vehiculo">
+    <div class="vehiculo-title">Vehículo 2</div>
+    <div class="punto">Depósito Central → Cliente A → Depósito Central</div>
+    <div style="color:#555; font-size:0.98em; margin-left:1.5em;">Distancia recorrida: <b>2.88 km</b></div>
+  </div>
+  <h3>Horarios estimados y demandas</h3>
+  <ul>
+    <li>Vehículo 1:<br>
+      Depósito (<span id="hora-veh1-0"></span>) →
+      Cliente B (<span id="hora-veh1-1"></span>, 1 paquete) →
+      Cliente C (<span id="hora-veh1-2"></span>, 1 paquete) →
+      Cliente D (<span id="hora-veh1-3"></span>, 1 paquete)
+    </li>
+    <li>Vehículo 2:<br>
+      Depósito (<span id="hora-veh2-0"></span>) →
+      Cliente A (<span id="hora-veh2-1"></span>, 1 paquete)
+    </li>
+  </ul>
+
+  <div class="benefits">
+    <b>¿Por qué elegir nuestro optimizador?</b>
+    <ul>
+      <li>Ahorro de tiempo y combustible: menos kilómetros recorridos.</li>
+      <li>Entregas puntuales: cumplimiento de ventanas de tiempo y entregas exactas.</li>
+      <li>Automatización total: solo ingresa los puntos y restricciones, el sistema hace el resto.</li>
+      <li>Escalable: soporta flotas y cientos de entregas.</li>
+      <li>Integración fácil: API lista para tu app, web o ERP.</li>
+    </ul>
+    <b>¿Listo para optimizar tu logística? ¡Contáctanos y lleva tu negocio al siguiente nivel!</b>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// Datos sintéticos de puntos
+const puntos = [
+  {id: 0, nombre: 'Depósito Central', lat: 13.7000, lon: -89.2000},
+  {id: 1, nombre: 'Cliente A', lat: 13.7020, lon: -89.2100},
+  {id: 2, nombre: 'Cliente B', lat: 13.7050, lon: -89.2200},
+  {id: 3, nombre: 'Cliente C', lat: 13.7100, lon: -89.2300},
+  {id: 4, nombre: 'Cliente D', lat: 13.7150, lon: -89.2400}
+];
+// Rutas resultantes (índices de puntos)
+const rutas = [
+  [0, 2, 3, 4, 0], // Vehículo 1
+  [0, 1, 0]        // Vehículo 2
+];
+const colores = ['#0b5394', '#38761d'];
+
+const map = L.map('map').setView([13.707, -89.22], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap contributors'
+}).addTo(map);
+
+// Marcadores
+puntos.forEach(p => {
+  L.marker([p.lat, p.lon], {
+    title: p.nombre,
+    icon: L.icon({
+      iconUrl: p.id === 0 ? 'https://cdn-icons-png.flaticon.com/512/684/684908.png' : 'https://cdn-icons-png.flaticon.com/512/684/684908.png',
+      iconSize: [32, 32],
+      iconAnchor: [16, 32],
+      popupAnchor: [0, -28]
+    })
+  })
+  .addTo(map)
+  .bindPopup(`<b>${p.nombre}</b>`);
+});
+
+// Utilidad para mostrar horas y minutos a partir de minutos
+function minToHM(min) {
+  const h = Math.floor(min / 60).toString().padStart(2, '0');
+  const m = Math.round(min % 60).toString().padStart(2, '0');
+  return `${h}:${m}`;
+}
+// Horarios y demandas (puedes actualizar estos valores si cambian)
+const horariosVeh1 = [551, 589, 626, 660];
+const horariosVeh2 = [444, 480];
+document.getElementById('hora-veh1-0').textContent = minToHM(horariosVeh1[0]);
+document.getElementById('hora-veh1-1').textContent = minToHM(horariosVeh1[1]);
+document.getElementById('hora-veh1-2').textContent = minToHM(horariosVeh1[2]);
+document.getElementById('hora-veh1-3').textContent = minToHM(horariosVeh1[3]);
+document.getElementById('hora-veh2-0').textContent = minToHM(horariosVeh2[0]);
+document.getElementById('hora-veh2-1').textContent = minToHM(horariosVeh2[1]);
+
+// Polyline real de Google Directions para la ruta optimizada (Vehículo 1)
+decodeAndDrawPolyline("_xrrA|zl_PsH[gHg@qAGSAEv@Ch@Af@@f@Fz@ZlB^bAT`@`B|Cb@zAJl@?dAO`DCd@o@dIQrDQ`DUvAeB|Es@hCo@xCGvB?dAFdBp@zEFdA?\\E`AWfB]vCSjBGvAAfBGhCGxAMrCQjAAp@Bb@j@vCo@Rq@XEDKo@K{@CSBRJz@Jn@EFuBb@eAVi@Ty@f@g@h@m@h@e@^m@r@OXSbAQ@c@JS?WG_@MaA]kAfAwAfB_AzA{AcA}A`CsAvBo@lASTj@RdF`BdIrCd@PLJHLDN@ZIPe@`AiBbEoAbCe@`AkAxB[QOAw@_@GNFOv@^N@ZPkChEs@jAe@|@e@nECNAPEb@Cb@IdAEb@?HIzASfBU~A_@lA{AlCo@l@u@t@Y`@e@d@A@CBEBGFIFQLcCvBe@n@U^i@`@KJILKb@AZAz@Uf@I`@CT{@Qz@PBUHa@n@oAXQLWDK?a@Fw@h@w@`@g@r@m@t@o@BCHGPOPOFG~@eA`A_Ab@c@^o@R_@l@mAX}@LcARqAL{BBY@G@Q@QDc@HeAh@}FNg@j@_AtEwHnAgCt@uAbA_ClAkCbA}B|AiDh@aA~@u@VSNSn@oAnAeCj@gBL_@|@eCn@gB^s@dB}BNg@@g@Mk@?UOi@Ms@K_ABo@T{@FyEH{F@mBBi@PoAJy@TeB@]PsAFsAGgAYuB]mCEsA@}AJmAd@oC|@sCp@cBdAoCPo@TyDJaCJyCXgFNoD?sAQ{Aq@{A_AiBq@wAYoAKy@GkA@_AXqGFeAfCPx@RtDR~CJbDPWtFO?", colores[0]);
+// Polyline real de Google Directions para la ruta optimizada (Vehículo 2)
+// Pega aquí el polyline de la ruta del segundo vehículo cuando lo tengas:
+decodeAndDrawPolyline("_xrrA|zl_PqDOYxFm@fN{@`QOdDWzGS|FE`AbADlBH~DZXcFX{GTaGPqEF_BBq@`ABn@B`ADn@cMXcGT_GqDOcEQ", colores[1]);
+
+// Función para decodificar y dibujar polyline de Google Directions en Leaflet
+function decodeAndDrawPolyline(encoded, color) {
+  const points = decodeGooglePolyline(encoded);
+  L.polyline(points, {color: color, weight: 5, opacity: 0.85}).addTo(map);
+}
+
+// Decodificador de polylines de Google (algoritmo estándar)
+function decodeGooglePolyline(encoded) {
+  let points = [];
+  let index = 0, len = encoded.length;
+  let lat = 0, lng = 0;
+  while (index < len) {
+    let b, shift = 0, result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    let dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lat += dlat;
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    let dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+    lng += dlng;
+    points.push([lat / 1e5, lng / 1e5]);
+  }
+  return points;
+}
+</script>
+</body>
+</html>

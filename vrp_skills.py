@@ -80,6 +80,8 @@ def vrp_skills(request: VRPSkillsRequest):
         False,
         'Time')
     time_dimension = routing.GetDimensionOrDie('Time')
+    # Penaliza el tiempo de espera (slack) para minimizar esperas innecesarias
+    time_dimension.SetSlackCostCoefficientForAllVehicles(100)  # Puedes ajustar el valor según preferencia
     for idx, window in enumerate(time_windows):
         index = manager.NodeToIndex(idx)
         time_dimension.CumulVar(index).SetRange(window[0], window[1])
@@ -145,7 +147,7 @@ def vrp_skills(request: VRPSkillsRequest):
             end = service_ends[i-1] if i-1 < len(service_ends) else serv
             wait = max(0, serv - arr)
             stime = service_times[route[i]] if route[i] < len(service_times) else 0
-            dets.append(f"Stop {i}: Nodo {route[i]} llegada {min_to_hhmm(arr)} espera {wait}min servicio {stime}min inicia {min_to_hhmm(serv)} sale {min_to_hhmm(end)}")
+            dets.append(f"Parada {i}: Punto {route[i]} | Hora de llegada {min_to_hhmm(arr)} | Tiempo de espera: {wait}min | Tiempo de servicio {stime}min | Inicia servicio: {min_to_hhmm(serv)} - Fin de servicio: {min_to_hhmm(end)}")
         details.append(f"Vehículo {vehicle_id+1}: {route} | Distancia: {route_distance:.2f} km\n" + "\n".join(dets))
         arrival_times.append(service_starts)
         for i, t in enumerate(service_ends):
