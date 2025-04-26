@@ -93,7 +93,14 @@ def vrp_capacity(request: VRPCapacityRequest):
             'Volume')
     # Ventanas de tiempo (opcional)
     if request.use_time_windows:
-        time_windows = [loc.time_window if hasattr(loc, 'time_window') and loc.time_window else [0, 1440] for loc in request.locations]
+        # Garantiza que cada locación tiene time_window como par [start, end]
+        time_windows = []
+        for loc in request.locations:
+            tw = getattr(loc, 'time_window', None)
+            if not tw or not isinstance(tw, list) or len(tw) != 2:
+                time_windows.append([0, 1440])
+            else:
+                time_windows.append([tw[0], tw[1]])
         def time_callback(from_index, to_index):
             from_node = manager.IndexToNode(from_index)
             to_node = manager.IndexToNode(to_index)
@@ -137,9 +144,15 @@ def vrp_capacity(request: VRPCapacityRequest):
         index = routing.Start(vehicle_id)
         route = []
         route_distance = 0
-        times = []
+        times = []  # Hora de llegada física
+        service_starts = []  # Hora de inicio de servicio (considerando espera)
+        service_ends = []    # Hora de salida (inicio_servicio + service_time)
         current_time = workday_start
         times.append(current_time)
+        service_time_list = [getattr(loc, 'service_time', 0) for loc in request.locations]
+        # time_windows ya está garantizado como par [start, end]
+        for_stop_windows = time_windows if request.use_time_windows else [[0, 1440] for _ in request.locations]
+        stop = 0
         while not routing.IsEnd(index):
             node = manager.IndexToNode(index)
             route.append(node)
@@ -147,18 +160,38 @@ def vrp_capacity(request: VRPCapacityRequest):
             index = solution.Value(routing.NextVar(index))
             travel_time = time_matrix[manager.IndexToNode(previous_index)][manager.IndexToNode(index)]
             current_time += travel_time
+            # Espera si llega antes de la ventana
             if not routing.IsEnd(index):
-                times.append(current_time)
+                window_start = for_stop_windows[index] [0]
+                real_arrival = current_time
+                wait = max(0, window_start - current_time)
+                start_service = real_arrival + wait
+                service_duration = service_time_list[index] if index < len(service_time_list) else 0
+                end_service = start_service + service_duration
+                times.append(real_arrival)
+                service_starts.append(start_service)
+                service_ends.append(end_service)
+                current_time = end_service
             route_distance += distance_matrix[manager.IndexToNode(previous_index)][manager.IndexToNode(index)]
+            stop += 1
         route.append(manager.IndexToNode(index))
         routes.append(route)
         total_distance += route_distance
-        details.append(f"Vehículo {vehicle_id+1}: {route} | Distancia: {route_distance:.2f} km")
-        arrival_times.append(times)
+        # Detalle por parada
+        dets = []
+        for i in range(1, len(route)-1):  # Saltar el depósito inicial/final
+            arr = times[i]
+            serv = service_starts[i-1] if i-1 < len(service_starts) else arr
+            end = service_ends[i-1] if i-1 < len(service_ends) else serv
+            wait = max(0, serv - arr)
+            stime = service_time_list[route[i]] if route[i] < len(service_time_list) else 0
+            dets.append(f"Stop {i}: Nodo {route[i]} llegada {min_to_hhmm(arr)} espera {wait}min servicio {stime}min inicia {min_to_hhmm(serv)} sale {min_to_hhmm(end)}")
+        details.append(f"Vehículo {vehicle_id+1}: {route} | Distancia: {route_distance:.2f} km\n" + "\n".join(dets))
+        arrival_times.append(service_starts)
         # Validar si alguna entrega supera el fin de jornada
-        for i, t in enumerate(times):
+        for i, t in enumerate(service_ends):
             if t > workday_end:
-                warnings.append(f"Vehículo {vehicle_id+1}: Entrega en parada {i} fuera de jornada laboral ({min_to_hhmm(t)} > {min_to_hhmm(workday_end)})")
+                warnings.append(f"Vehículo {vehicle_id+1}: Entrega en parada {i+1} fuera de jornada laboral ({min_to_hhmm(t)} > {min_to_hhmm(workday_end)})")
 
     # Formatear los tiempos de llegada después de calcularlos
     arrival_times_formatted = [[min_to_hhmm(t) for t in times] for times in arrival_times]

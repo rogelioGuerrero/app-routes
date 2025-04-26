@@ -55,10 +55,17 @@ class AdvancedLocation(BaseModel):
     demand: Optional[int] = 0
     weight: Optional[float] = 0.0
     volume: Optional[float] = 0.0
-    time_window: Optional[List[int]] = None
+    time_window: Optional[List[int]] = None  # [start, end] en minutos desde medianoche
+    service_time: int = 5  # Tiempo de servicio en minutos (default=5)
+
+    @validator('time_window')
+    def validate_time_window(cls, v):
+        if not v or not isinstance(v, list) or len(v) != 2:
+            return [420, 1080]  # 07:00 a 18:00
+        return v
 
 class VRPCapacityRequest(BaseModel):
-    locations: List[AdvancedLocation]
+    locations: List[AdvancedLocation]  # Cada locación debe tener time_window=[start, end] y puede tener service_time (min)
     # Jornada laboral en minutos desde medianoche (ej: 420 = 07:00, 1080 = 18:00). Si no se envía, se usan los valores por defecto 07:00-18:00.
     workday_start: Optional[int] = None
     workday_end: Optional[int] = None

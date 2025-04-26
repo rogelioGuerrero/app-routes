@@ -1,0 +1,29 @@
+uvicorn main:app --reload
+
+
+Caso de uso: Optimización de rutas con restricciones de capacidad (VRP-Capacity)
+
+Descripción:
+Este caso de uso prueba el endpoint /vrp-capacity de la API FastAPI desplegada, que resuelve el problema de ruteo de vehículos considerando restricciones de demanda, peso y volumen. Se usan ubicaciones sintéticas en la Ciudad de México, simulando un depósito y dos clientes, con capacidades limitadas en el vehículo.
+
+Fortalezas de la app demostradas en este caso:
+1. Permite modelar restricciones múltiples (cantidad, peso, volumen) en los vehículos.
+2. Integra cálculo de rutas realistas mediante Google Distance Matrix API.
+3. Soporta ventanas de tiempo y llegada estimada a cada punto.
+4. Devuelve rutas optimizadas y polilíneas para visualización geográfica.
+5. Responde con detalles claros y formatos útiles para integración con otros sistemas.
+
+Resumen del input:
+- 1 depósito y 2 clientes
+- Restricciones activadas: cantidad, peso, volumen
+- Capacidad del vehículo: 5 unidades, 20 kg, 2 m3
+- Demanda de clientes: 2 y 3 unidades
+- Coordenadas reales de la CDMX
+
+Resumen del output:
+- Ruta óptima calculada: [0, 2, 1, 0]
+- Distancia total: 9.38 km
+- Horarios de llegada estimados: 07:00, 07:08, 07:21
+- Polilínea y GeoJSON generados para mapas
+
+Este caso valida la robustez y utilidad de la API para aplicaciones logísticas reales.
