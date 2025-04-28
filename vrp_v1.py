@@ -202,6 +202,79 @@ async def vrp_v1(request: VRPSkillsRequest):
     if not_assigned:
         warnings_out.append(f"No se pudo asignar: {', '.join(not_assigned)}")
 
+    # Si no hay solución, retorna respuesta vacía pero válida
+    if not solution:
+        return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=warnings_out)
+
+    # --- Armado del objeto solution ---
+    route_polylines = []
+    route_points = []
+    details = []
+    for idx_r, r in enumerate(routes):
+        latlons = [(request.locations[idx].lat, request.locations[idx].lon) for idx in r["route"]]
+        try:
+            polyline, _ = get_route_polyline_and_geojson(latlons, api_key=api_key)
+        except Exception:
+            polyline = None
+        route_polylines.append(polyline)
+        route_points.append(latlons)
+
+        # Detalle de paradas para cada vehículo
+        stops_detail = []
+        current_time = VRPConstants.WORKDAY_START_MIN
+        times = [current_time]
+        service_starts = []
+        service_ends = []
+        stop = 0
+        for i in range(1, len(r["route"])):
+            prev_idx = r["route"][i-1]
+            idx = r["route"][i]
+            travel_time = time_matrix[prev_idx][idx]
+            current_time += travel_time
+            window_start = time_windows[idx][0] if idx < len(time_windows) else VRPConstants.WORKDAY_START_MIN
+            real_arrival = current_time
+            wait = max(0, window_start - current_time)
+            start_service = real_arrival + wait
+            service_duration = service_times[idx] if idx < len(service_times) else 0
+            end_service = start_service + service_duration
+            times.append(real_arrival)
+            service_starts.append(start_service)
+            service_ends.append(end_service)
+            current_time = end_service
+            stops_detail.append({
+                "stop_index": stop+1,
+                "location_id": idx,
+                "arrival_time": real_arrival,
+                "arrival_time_hhmm": min_to_hhmm(real_arrival),
+                "wait_time": wait,
+                "service_time": service_duration,
+                "service_start": start_service,
+                "service_start_hhmm": min_to_hhmm(start_service),
+                "service_end": end_service,
+                "service_end_hhmm": min_to_hhmm(end_service)
+            })
+            stop += 1
+        details.append({
+            "vehicle_id": r["vehicle_id"],
+            "stops": stops_detail
+        })
+
+    solution = {
+        "routes": routes,
+        "total_distance": total_distance,
+        "route_polylines": route_polylines,
+        "route_points": route_points,
+        "details": details
+    }
+    return VRPAdvancedResponse(
+        solution=solution,
+        metadata=metadata,
+        warnings=warnings_out if warnings_out else None
+    )
+
+    # --- Retorno de seguridad: nunca debería llegar aquí, pero previene errores 500 si algo falla ---
+    return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=["Error interno: no se generó respuesta."])
+
     t1 = time.perf_counter()
     metadata = {
         "computation_time_ms": int((t1-t0)*1000),
@@ -256,56 +329,3 @@ async def vrp_v1(request: VRPSkillsRequest):
                     "service_end": end_service,
                     "service_end_hhmm": min_to_hhmm(end_service)
                 })
-            route_distance += distance_matrix[manager.IndexToNode(previous_index)][manager.IndexToNode(index)]
-            stop += 1
-        route.append(manager.IndexToNode(index))
-        return route, route_distance, stops_detail, service_starts, service_ends
-
-    for vehicle_id in range(request.num_vehicles):
-        route, route_distance, stops_detail, service_starts, service_ends = build_route(vehicle_id)
-        routes.append(route)
-        total_distance += route_distance
-        route_details.append(RouteDetail(
-            vehicle_id=vehicle_id+1,
-            route=route,
-            distance_km=route_distance,
-            stops=stops_detail
-        ))
-        arrival_times.append(service_starts)
-
-    arrival_times_formatted = [[min_to_hhmm(t) for t in times] for times in arrival_times]
-    # Polylines solo si include_polylines
-    route_polylines = None
-    route_points = None
-    if getattr(request, 'include_polylines', True):
-        async def compute_polylines(routes, locations):
-            def get_polyline(route):
-                latlons = [(locations[idx].lat, locations[idx].lon) for idx in route]
-                try:
-                    polyline, _ = get_route_polyline_and_geojson(latlons)
-                except Exception:
-                    polyline = None
-                return polyline
-            with ThreadPoolExecutor() as executor:
-                loop = asyncio.get_event_loop()
-                tasks = [loop.run_in_executor(executor, get_polyline, route) for route in routes]
-                return await asyncio.gather(*tasks)
-        route_polylines = await compute_polylines(routes, request.locations)
-        route_points = [[(request.locations[idx].lat, request.locations[idx].lon) for idx in route] for route in routes]
-    t1 = time.perf_counter()
-    solution = {
-        "routes": routes,
-        "total_distance": round(total_distance, 2),
-        "details": [rd.dict() for rd in route_details],
-        "arrival_times": arrival_times,
-        "arrival_times_formatted": arrival_times_formatted,
-    }
-    if route_polylines is not None:
-        solution["route_polylines"] = route_polylines
-    if route_points is not None:
-        solution["route_points"] = route_points
-    return VRPAdvancedResponse(
-        solution=solution,
-        metadata={"computation_time_ms": int((t1-t0)*1000)},
-        warnings=None
-    )
