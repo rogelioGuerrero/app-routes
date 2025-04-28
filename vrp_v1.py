@@ -3,7 +3,8 @@ from schemas_skills import VRPSkillsRequest
 from schemas import VRPAdvancedResponse, RouteDetail
 from vrp_utils import (
     VRPConstants, min_to_hhmm, validate_request_coords, validate_skills_and_capacities,
-    build_distance_and_time_matrices, GoogleAPIError, validate_full_request, build_fallback_matrix
+    build_distance_and_time_matrices, GoogleAPIError, validate_full_request, build_fallback_matrix,
+    build_vrp_solution
 )
 from route_polyline_utils import get_route_polyline_and_geojson
 import asyncio
@@ -24,13 +25,22 @@ async def vrp_v1(request: VRPSkillsRequest):
     # Validación robusta de entrada y casos límite
     valid, early_warnings, early_solution = validate_full_request(request)
     if not valid:
-        return VRPAdvancedResponse(solution={}, metadata={}, warnings=early_warnings)
+        return VRPAdvancedResponse(
+            solution={},
+            metadata={},
+            warnings=early_warnings)
     # Si strict_mode está activo, el validador ya lanza error si hay ubicaciones imposibles
     # Si no, se permite penalización y solución parcial (lógica ya implementada en el solver)
 
     warnings = validate_skills_and_capacities(request)
     if warnings:
-        return VRPAdvancedResponse(solution={}, metadata={}, warnings=warnings)
+        return VRPAdvancedResponse(
+            solution={},
+            metadata={
+                "sugerencia_salida_deposito": sugerencia_salida,
+                "mensaje_sugerencia": mensaje_sugerencia
+            },
+            warnings=warnings)
 
     # Construcción de matrices con fallback
     try:
@@ -57,67 +67,271 @@ async def vrp_v1(request: VRPSkillsRequest):
             warnings=[matrix_warning] if matrix_warning else None
         )
 
-    # --- Solver OR-Tools ---
-    from ortools.constraint_solver import pywrapcp, routing_enums_pb2
-    n = len(request.locations)
-    manager = pywrapcp.RoutingIndexManager(n, request.num_vehicles, request.depot)
-    routing = pywrapcp.RoutingModel(manager)
+    # --- Ciclo externo para minimizar la espera en el primer cliente reconstruyendo el modelo ---
+    max_wait_minutes = 10
+    max_iters = 5
+    iter_count = 0
+    best_solution = None
+    best_wait = None
+    best_earliest_start = None
+    earliest_start = None
 
-    def distance_callback(from_index, to_index):
-        from_node = manager.IndexToNode(from_index)
-        to_node = manager.IndexToNode(to_index)
-        return int(distance_matrix[from_node][to_node])
-    transit_callback_index = routing.RegisterTransitCallback(distance_callback)
-    routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+    while iter_count < max_iters:
+        from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+        n = len(request.locations)
+        manager = pywrapcp.RoutingIndexManager(n, request.num_vehicles, request.depot)
+        routing = pywrapcp.RoutingModel(manager)
 
-    # Skills y penalizaciones
-    vehicle_skills = [set(v.provided_skills or []) for v in request.vehicles]
-    location_skills = [set(l.required_skills or []) for l in request.locations]
-    from vrp_utils import apply_skills_penalty
-    apply_skills_penalty(routing, manager, request, vehicle_skills, location_skills, penalty=100_000)
+        def distance_callback(from_index, to_index):
+            from_node = manager.IndexToNode(from_index)
+            to_node = manager.IndexToNode(to_index)
+            return int(distance_matrix[from_node][to_node])
+        transit_callback_index = routing.RegisterTransitCallback(distance_callback)
+        routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
-    # Dimensiones de capacidad (weight, volume, demand)
-    from vrp_utils import add_capacity_dimensions
-    add_capacity_dimensions(routing, manager, request)
+        # Skills y penalizaciones
+        vehicle_skills = [set(v.provided_skills or []) for v in request.vehicles]
+        location_skills = [set(l.required_skills or []) for l in request.locations]
+        from vrp_utils import apply_skills_penalty
+        apply_skills_penalty(routing, manager, request, vehicle_skills, location_skills, penalty=100_000)
 
-    # Time windows y service time
-    time_windows = []
-    service_times = []
-    for idx, loc in enumerate(request.locations):
-        tw = loc.time_window if loc.time_window and len(loc.time_window) == 2 else [VRPConstants.WORKDAY_START_MIN, VRPConstants.WORKDAY_END_MIN]
-        time_windows.append(tw)
-        service_times.append(getattr(loc, 'service_time', VRPConstants.DEFAULT_SERVICE_TIME_MIN) if idx != request.depot else 0)
+        # Dimensiones de capacidad (weight, volume, demand)
+        from vrp_utils import add_capacity_dimensions
+        add_capacity_dimensions(routing, manager, request)
 
-    def time_callback(from_index, to_index):
-        from_node = manager.IndexToNode(from_index)
-        to_node = manager.IndexToNode(to_index)
-        return int(time_matrix[from_node][to_node] + service_times[from_node])
-    time_callback_index = routing.RegisterTransitCallback(time_callback)
-    routing.AddDimension(
-        time_callback_index,
-        VRPConstants.MAX_TIME_MIN,
-        VRPConstants.MAX_TIME_MIN,
-        False,
-        'Time')
-    time_dimension = routing.GetDimensionOrDie('Time')
-    time_dimension.SetSlackCostCoefficientForAllVehicles(100)
-    for idx, window in enumerate(time_windows):
-        index = manager.NodeToIndex(idx)
-        time_dimension.CumulVar(index).SetRange(window[0], window[1])
-    for idx, st in enumerate(service_times):
-        index = manager.NodeToIndex(idx)
-        time_dimension.SlackVar(index).SetValue(st)
+        # Time windows y service time
+        time_windows = []
+        service_times = []
+        for idx, loc in enumerate(request.locations):
+            tw = loc.time_window if loc.time_window and len(loc.time_window) == 2 else [VRPConstants.WORKDAY_START_MIN, VRPConstants.WORKDAY_END_MIN]
+            time_windows.append(tw)
+            service_times.append(getattr(loc, 'service_time', VRPConstants.DEFAULT_SERVICE_TIME_MIN) if idx != request.depot else 0)
 
-    # (Opcional) penalización por saltar ventanas de tiempo: hook para extender
-    # from vrp_utils import apply_time_window_penalty
-    # apply_time_window_penalty(routing, manager, time_dimension, penalty=100_000)
+        def time_callback(from_index, to_index):
+            from_node = manager.IndexToNode(from_index)
+            to_node = manager.IndexToNode(to_index)
+            return int(time_matrix[from_node][to_node] + service_times[from_node])
+        time_callback_index = routing.RegisterTransitCallback(time_callback)
+        routing.AddDimension(
+            time_callback_index,
+            VRPConstants.MAX_TIME_MIN,  # slack máximo permitido
+            VRPConstants.MAX_TIME_MIN,  # tiempo máximo por ruta
+            False,
+            'Time')
+        time_dimension = routing.GetDimensionOrDie('Time')
+        penalizacion_espera = 1000
+        time_dimension.SetSlackCostCoefficientForAllVehicles(penalizacion_espera)
+        # Ajuste dinámico de la ventana del depósito para evitar salidas demasiado tempranas
+        for vehicle_id, vehicle in enumerate(request.vehicles):
+            depot_index = routing.Start(vehicle_id)
+            start_time_orig = getattr(vehicle, 'start_time', VRPConstants.WORKDAY_START_MIN)
+            end_time = getattr(vehicle, 'end_time', VRPConstants.WORKDAY_END_MIN)
+            earliest_client_start = min([tw[0] for i, tw in enumerate(time_windows) if i != request.depot])
+            min_travel_time = min([time_matrix[request.depot][i] for i in range(n) if i != request.depot])
+            # En la segunda iteración en adelante, earliest_start se ajusta
+            if earliest_start is not None:
+                start_time = earliest_start
+            else:
+                start_time = max(start_time_orig, earliest_client_start - min_travel_time)
+            time_dimension.CumulVar(depot_index).SetRange(start_time, end_time)
+        for idx, window in enumerate(time_windows):
+            if idx == request.depot:
+                continue
+            index = manager.NodeToIndex(idx)
+            time_dimension.CumulVar(index).SetRange(window[0], window[1])
+        for idx, st in enumerate(service_times):
+            index = manager.NodeToIndex(idx)
+            time_dimension.SlackVar(index).SetValue(st)
 
-    # Configuración flexible del solver
-    search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-    search_parameters.time_limit.seconds = getattr(request, 'solver_timeout', VRPConstants.DEFAULT_SOLVER_TIMEOUT_SEC)
-    search_parameters.first_solution_strategy = (
-        routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
-    solution = routing.SolveWithParameters(search_parameters)
+        search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+        search_parameters.time_limit.seconds = getattr(request, 'solver_timeout', VRPConstants.DEFAULT_SOLVER_TIMEOUT_SEC)
+        search_parameters.first_solution_strategy = (
+            routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+        solution = routing.SolveWithParameters(search_parameters)
+        if solution is None:
+            break
+        # Extrae la espera en el primer cliente de la ruta del primer vehículo
+        route = []
+        index = routing.Start(0)
+        while not routing.IsEnd(index):
+            route.append(index)
+            index = solution.Value(routing.NextVar(index))
+        if len(route) > 1:
+            first_customer_idx = manager.IndexToNode(route[1])
+            first_customer_index = route[1]
+            arrival = solution.Value(time_dimension.CumulVar(first_customer_index))
+            wait = arrival - time_windows[first_customer_idx][0]
+            if wait < 0:
+                wait = 0
+        else:
+            wait = 0
+        if best_wait is None or wait < best_wait:
+            best_wait = wait
+            best_solution = solution
+            best_earliest_start = start_time
+        if wait <= max_wait_minutes:
+            break
+        # Ajusta earliest_start para la siguiente iteración
+        depot_index = routing.Start(0)
+        current_start = solution.Value(time_dimension.CumulVar(depot_index))
+        earliest_start = current_start + (wait - max_wait_minutes)
+        iter_count += 1
+    solution = best_solution
+
+    # --- Sugerencia de salida del depósito si la espera en el primer cliente es excesiva ---
+    sugerencia_salida = None
+    mensaje_sugerencia = None
+    # Umbral de espera prolongada configurable
+    # (Eliminado: sugerencia de salida y mensaje, ya no se usan)
+
+    t1 = time.perf_counter()
+    # Calcular hora de salida real del depósito para el primer cliente (solo si hay ruta)
+    hora_salida_deposito = None
+    if solution is not None:
+        route = []
+        index = routing.Start(0)
+        while not routing.IsEnd(index):
+            route.append(index)
+            index = solution.Value(routing.NextVar(index))
+        if len(route) > 1:
+            first_customer_idx = manager.IndexToNode(route[1])
+            arrival = solution.Value(time_dimension.CumulVar(route[1]))
+            travel_time = time_matrix[request.depot][first_customer_idx]
+            hora_salida_min = arrival - travel_time
+            hora_salida_deposito = {
+                "minutos": hora_salida_min,
+                "hhmm": min_to_hhmm(hora_salida_min),
+                "primer_cliente": first_customer_idx
+            }
+
+    metadata = {
+        "computation_time_ms": int((t1-t0)*1000),
+        "num_vehicles": getattr(request, 'num_vehicles', len(getattr(request, 'vehicles', []))),
+        "num_clients": len(getattr(request, 'locations', [])) - 1 if hasattr(request, 'locations') else None,
+        "strict_mode": getattr(request, 'strict_mode', False),
+        "buffer_minutes": getattr(request, 'buffer_minutes', 10),
+        "peak_hours": getattr(request, 'peak_hours', None),
+        "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20),
+        "hora_salida_deposito": hora_salida_deposito
+    }
+
+    # --- Return FINAL asegurando metadata correcta ---
+    return VRPAdvancedResponse(
+        solution=build_vrp_solution(solution, routing, manager, request, time_dimension, time_windows, service_times, distance_matrix, time_matrix),
+        metadata=metadata,
+        warnings=[matrix_warning] if 'matrix_warning' in locals() and matrix_warning else None
+    )
+
+    # --- Ciclo externo para minimizar la espera en el primer cliente reconstruyendo el modelo ---
+    max_wait_minutes = 10
+    max_iters = 5
+    iter_count = 0
+    best_solution = None
+    best_wait = None
+    best_earliest_start = None
+    earliest_start = None
+
+    while iter_count < max_iters:
+        from ortools.constraint_solver import pywrapcp, routing_enums_pb2
+        n = len(request.locations)
+        manager = pywrapcp.RoutingIndexManager(n, request.num_vehicles, request.depot)
+        routing = pywrapcp.RoutingModel(manager)
+
+        def distance_callback(from_index, to_index):
+            from_node = manager.IndexToNode(from_index)
+            to_node = manager.IndexToNode(to_index)
+            return int(distance_matrix[from_node][to_node])
+        transit_callback_index = routing.RegisterTransitCallback(distance_callback)
+        routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+
+        # Skills y penalizaciones
+        vehicle_skills = [set(v.provided_skills or []) for v in request.vehicles]
+        location_skills = [set(l.required_skills or []) for l in request.locations]
+        from vrp_utils import apply_skills_penalty
+        apply_skills_penalty(routing, manager, request, vehicle_skills, location_skills, penalty=100_000)
+
+        # Dimensiones de capacidad (weight, volume, demand)
+        from vrp_utils import add_capacity_dimensions
+        add_capacity_dimensions(routing, manager, request)
+
+        # Time windows y service time
+        time_windows = []
+        service_times = []
+        for idx, loc in enumerate(request.locations):
+            tw = loc.time_window if loc.time_window and len(loc.time_window) == 2 else [VRPConstants.WORKDAY_START_MIN, VRPConstants.WORKDAY_END_MIN]
+            time_windows.append(tw)
+            service_times.append(getattr(loc, 'service_time', VRPConstants.DEFAULT_SERVICE_TIME_MIN) if idx != request.depot else 0)
+
+        def time_callback(from_index, to_index):
+            from_node = manager.IndexToNode(from_index)
+            to_node = manager.IndexToNode(to_index)
+            return int(time_matrix[from_node][to_node] + service_times[from_node])
+        time_callback_index = routing.RegisterTransitCallback(time_callback)
+        routing.AddDimension(
+            time_callback_index,
+            VRPConstants.MAX_TIME_MIN,  # slack máximo permitido
+            VRPConstants.MAX_TIME_MIN,  # tiempo máximo por ruta
+            False,
+            'Time')
+        time_dimension = routing.GetDimensionOrDie('Time')
+        penalizacion_espera = 1000
+        time_dimension.SetSlackCostCoefficientForAllVehicles(penalizacion_espera)
+        # Ajuste dinámico de la ventana del depósito para evitar salidas demasiado tempranas
+        for vehicle_id, vehicle in enumerate(request.vehicles):
+            depot_index = routing.Start(vehicle_id)
+            start_time_orig = getattr(vehicle, 'start_time', VRPConstants.WORKDAY_START_MIN)
+            end_time = getattr(vehicle, 'end_time', VRPConstants.WORKDAY_END_MIN)
+            earliest_client_start = min([tw[0] for i, tw in enumerate(time_windows) if i != request.depot])
+            min_travel_time = min([time_matrix[request.depot][i] for i in range(n) if i != request.depot])
+            # En la segunda iteración en adelante, earliest_start se ajusta
+            if earliest_start is not None:
+                start_time = earliest_start
+            else:
+                start_time = max(start_time_orig, earliest_client_start - min_travel_time)
+            time_dimension.CumulVar(depot_index).SetRange(start_time, end_time)
+        for idx, window in enumerate(time_windows):
+            if idx == request.depot:
+                continue
+            index = manager.NodeToIndex(idx)
+            time_dimension.CumulVar(index).SetRange(window[0], window[1])
+        for idx, st in enumerate(service_times):
+            index = manager.NodeToIndex(idx)
+            time_dimension.SlackVar(index).SetValue(st)
+
+        search_parameters = pywrapcp.DefaultRoutingSearchParameters()
+        search_parameters.time_limit.seconds = getattr(request, 'solver_timeout', VRPConstants.DEFAULT_SOLVER_TIMEOUT_SEC)
+        search_parameters.first_solution_strategy = (
+            routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+        solution = routing.SolveWithParameters(search_parameters)
+        if solution is None:
+            break
+        # Extrae la espera en el primer cliente de la ruta del primer vehículo
+        route = []
+        index = routing.Start(0)
+        while not routing.IsEnd(index):
+            route.append(index)
+            index = solution.Value(routing.NextVar(index))
+        if len(route) > 1:
+            first_customer_idx = manager.IndexToNode(route[1])
+            first_customer_index = route[1]
+            arrival = solution.Value(time_dimension.CumulVar(first_customer_index))
+            wait = arrival - time_windows[first_customer_idx][0]
+            if wait < 0:
+                wait = 0
+        else:
+            wait = 0
+        if best_wait is None or wait < best_wait:
+            best_wait = wait
+            best_solution = solution
+            best_earliest_start = start_time
+        if wait <= max_wait_minutes:
+            break
+        # Ajusta earliest_start para la siguiente iteración
+        depot_index = routing.Start(0)
+        current_start = solution.Value(time_dimension.CumulVar(depot_index))
+        earliest_start = current_start + (wait - max_wait_minutes)
+        iter_count += 1
+    solution = best_solution
 
     t1 = time.perf_counter()
     metadata = {

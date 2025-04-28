@@ -121,6 +121,110 @@ def validate_skills_and_capacities(request) -> List[str]:
 
 from datetime import datetime, timedelta
 
+def build_vrp_solution(solution, routing, manager, request, time_dimension, time_windows, service_times, distance_matrix, time_matrix):
+    """
+    Devuelve la estructura avanzada con rutas, polylines, puntos y detalles por parada según el formato solicitado por el usuario.
+    """
+    from route_polyline_utils import get_route_polyline_and_geojson
+    if solution is None:
+        return {
+            "routes": [],
+            "total_distance": 0,
+            "route_polylines": [],
+            "route_points": [],
+            "details": []
+        }
+    num_vehicles = request.num_vehicles
+    depot = request.depot
+    n = len(request.locations)
+    routes = []
+    route_polylines = []
+    route_points = []
+    details = []
+    total_distance = 0
+    locations = request.locations
+    for vehicle_id in range(num_vehicles):
+        index = routing.Start(vehicle_id)
+        route = []
+        times = []
+        espera = []
+        service_starts = []
+        service_ends = []
+        route_distance = 0
+        stops = []
+        while not routing.IsEnd(index):
+            node = manager.IndexToNode(index)
+            route.append(node)
+            # Tiempos
+            arrival = solution.Value(time_dimension.CumulVar(index))
+            times.append(arrival)
+            # Espera
+            wait = max(0, arrival - time_windows[node][0])
+            espera.append(wait)
+            # Servicio
+            service_start = arrival
+            service_end = arrival + service_times[node]
+            service_starts.append(service_start)
+            service_ends.append(service_end)
+            previous_index = index
+            index = solution.Value(routing.NextVar(index))
+            if not routing.IsEnd(index):
+                route_distance += distance_matrix[node][manager.IndexToNode(index)]
+        # Añadir regreso al depósito
+        node = manager.IndexToNode(index)
+        route.append(node)
+        arrival = solution.Value(time_dimension.CumulVar(index))
+        times.append(arrival)
+        espera.append(0)
+        service_starts.append(arrival)
+        service_ends.append(arrival)
+        # Construir stops detallados
+        for stop_idx, node in enumerate(route[1:], 1):
+            # Cálculo correcto del tiempo de espera: solo si el vehículo llega antes de la ventana de servicio
+            ventana_inicio = time_windows[node][0]
+            arrival = times[stop_idx]
+            wait_time = max(0, ventana_inicio - arrival) if arrival < ventana_inicio else 0
+            stop = {
+                "stop_index": stop_idx,
+                "location_id": node,
+                "arrival_time": arrival,
+                "arrival_time_hhmm": min_to_hhmm(arrival),
+                "wait_time": wait_time,
+                "service_time": service_times[node],
+                "service_start": service_starts[stop_idx],
+                "service_start_hhmm": min_to_hhmm(service_starts[stop_idx]),
+                "service_end": service_ends[stop_idx],
+                "service_end_hhmm": min_to_hhmm(service_ends[stop_idx])
+            }
+            stops.append(stop)
+        # Rutas y detalles
+        routes.append({
+            "vehicle_id": vehicle_id,
+            "route": route,
+            "route_distance": round(route_distance, 2)
+        })
+        total_distance += route_distance
+        # Polyline y puntos
+        latlons = [(locations[nodo].lat, locations[nodo].lon) for nodo in route]
+        try:
+            polyline, _ = get_route_polyline_and_geojson(latlons)
+        except Exception:
+            polyline = None
+        route_polylines.append(polyline)
+        route_points.append([[float(locations[nodo].lat), float(locations[nodo].lon)] for nodo in route])
+        details.append({
+            "vehicle_id": vehicle_id,
+            "stops": stops
+        })
+    return {
+        "routes": routes,
+        "total_distance": round(total_distance, 2),
+        "route_polylines": route_polylines,
+        "route_points": route_points,
+        "details": details
+    }
+
+
 def parse_time_str(s):
     # '07:00' -> minutos desde medianoche
     h, m = map(int, s.split(':'))
@@ -128,7 +232,14 @@ def parse_time_str(s):
 
 def is_in_peak(hour_minute, peak_hours):
     # hour_minute: minutos desde medianoche
-    for start, end in (peak_hours or []):
+    for period in (peak_hours or []):
+        if isinstance(period, str):
+            if '-' in period:
+                start, end = period.split('-')
+            else:
+                continue  # formato no válido
+        else:
+            start, end = period
         start_min = parse_time_str(start)
         end_min = parse_time_str(end)
         if start_min <= hour_minute < end_min:
