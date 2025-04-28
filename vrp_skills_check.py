@@ -48,7 +48,17 @@ async def vrp_skills_check(request: VRPSkillsRequest):
             missing = req_skills - all_vehicle_skills
             msg += f"{request.locations[idx].name} (falta: {', '.join(missing)}), "
         msg += "Añada estas habilidades a algún vehículo."
-        return VRPAdvancedResponse(solution=None, metadata={}, warnings=[msg])
+        t1 = time.perf_counter()
+        metadata = {
+            "computation_time_ms": int((t1-t0)*1000),
+            "num_vehicles": getattr(request, 'num_vehicles', len(getattr(request, 'vehicles', []))),
+            "num_clients": len(getattr(request, 'locations', [])) - 1 if hasattr(request, 'locations') else None,
+            "strict_mode": getattr(request, 'strict_mode', False),
+            "buffer_minutes": getattr(request, 'buffer_minutes', 10),
+            "peak_hours": getattr(request, 'peak_hours', None),
+            "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
+        }
+        return VRPAdvancedResponse(solution=None, metadata=metadata, warnings=[msg])
 
     # --- PRECHEQUEO: Capacidades por ubicación y vehículo ---
     over_capacity = []
@@ -66,7 +76,17 @@ async def vrp_skills_check(request: VRPSkillsRequest):
             f"Las siguientes ubicaciones superan la capacidad de todos los vehículos: {', '.join(over_capacity)}. "
             "Ajuste la capacidad de los vehículos o reduzca las demandas de estas ubicaciones."
         )
-        return VRPAdvancedResponse(solution=None, metadata={}, warnings=[msg])
+        t1 = time.perf_counter()
+        metadata = {
+            "computation_time_ms": int((t1-t0)*1000),
+            "num_vehicles": getattr(request, 'num_vehicles', len(getattr(request, 'vehicles', []))),
+            "num_clients": len(getattr(request, 'locations', [])) - 1 if hasattr(request, 'locations') else None,
+            "strict_mode": getattr(request, 'strict_mode', False),
+            "buffer_minutes": getattr(request, 'buffer_minutes', 10),
+            "peak_hours": getattr(request, 'peak_hours', None),
+            "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
+        }
+        return VRPAdvancedResponse(solution=None, metadata=metadata, warnings=[msg])
 
     # --- MATRIZ DE DISTANCIAS ---
     origins = [f"{loc.lat},{loc.lon}" for loc in request.locations]
@@ -185,9 +205,29 @@ async def vrp_skills_check(request: VRPSkillsRequest):
                 f"Las siguientes ubicaciones tienen ventanas de tiempo incompatibles con los vehículos: {', '.join(out_of_time)}. "
                 "Ajuste los horarios de los vehículos o las ventanas de tiempo de estas ubicaciones."
             )
-            return VRPAdvancedResponse(solution=None, metadata={}, warnings=[msg])
+            t1 = time.perf_counter()
+        metadata = {
+            "computation_time_ms": int((t1-t0)*1000),
+            "num_vehicles": getattr(request, 'num_vehicles', len(getattr(request, 'vehicles', []))),
+            "num_clients": len(getattr(request, 'locations', [])) - 1 if hasattr(request, 'locations') else None,
+            "strict_mode": getattr(request, 'strict_mode', False),
+            "buffer_minutes": getattr(request, 'buffer_minutes', 10),
+            "peak_hours": getattr(request, 'peak_hours', None),
+            "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
+        }
+        return VRPAdvancedResponse(solution=None, metadata=metadata, warnings=[msg])
         msg = "No se encontró solución factible para las restricciones dadas. Revise: habilidades requeridas y ofrecidas, capacidades de los vehículos y ventanas de tiempo."
-        return VRPAdvancedResponse(solution=None, metadata={}, warnings=[msg])
+        t1 = time.perf_counter()
+        metadata = {
+            "computation_time_ms": int((t1-t0)*1000),
+            "num_vehicles": getattr(request, 'num_vehicles', len(getattr(request, 'vehicles', []))),
+            "num_clients": len(getattr(request, 'locations', [])) - 1 if hasattr(request, 'locations') else None,
+            "strict_mode": getattr(request, 'strict_mode', False),
+            "buffer_minutes": getattr(request, 'buffer_minutes', 10),
+            "peak_hours": getattr(request, 'peak_hours', None),
+            "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
+        }
+        return VRPAdvancedResponse(solution=None, metadata=metadata, warnings=[msg])
 
     # --- CONSTRUIR RESPUESTA NORMAL (optimización de tiempos de llegada ya mejorada) ---
     routes = []
