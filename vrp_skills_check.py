@@ -58,7 +58,7 @@ async def vrp_skills_check(request: VRPSkillsRequest):
             "peak_hours": getattr(request, 'peak_hours', None),
             "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
         }
-        return VRPAdvancedResponse(solution=None, metadata=metadata, warnings=[msg])
+        return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=[msg])
 
     # --- PRECHEQUEO: Capacidades por ubicación y vehículo ---
     over_capacity = []
@@ -86,7 +86,7 @@ async def vrp_skills_check(request: VRPSkillsRequest):
             "peak_hours": getattr(request, 'peak_hours', None),
             "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
         }
-        return VRPAdvancedResponse(solution=None, metadata=metadata, warnings=[msg])
+        return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=[msg])
 
     # --- MATRIZ DE DISTANCIAS ---
     origins = [f"{loc.lat},{loc.lon}" for loc in request.locations]
@@ -215,7 +215,7 @@ async def vrp_skills_check(request: VRPSkillsRequest):
             "peak_hours": getattr(request, 'peak_hours', None),
             "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
         }
-        return VRPAdvancedResponse(solution=None, metadata=metadata, warnings=[msg])
+        return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=[msg])
         msg = "No se encontró solución factible para las restricciones dadas. Revise: habilidades requeridas y ofrecidas, capacidades de los vehículos y ventanas de tiempo."
         t1 = time.perf_counter()
         metadata = {
@@ -227,7 +227,7 @@ async def vrp_skills_check(request: VRPSkillsRequest):
             "peak_hours": getattr(request, 'peak_hours', None),
             "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
         }
-        return VRPAdvancedResponse(solution=None, metadata=metadata, warnings=[msg])
+        return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=[msg])
 
     # --- CONSTRUIR RESPUESTA NORMAL (optimización de tiempos de llegada ya mejorada) ---
     routes = []
