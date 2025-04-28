@@ -130,8 +130,31 @@ async def vrp_v1(request: VRPSkillsRequest):
         "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
     }
 
+    # --- Warning enriquecido: ubicaciones no atendidas (incluso si no hay solución) ---
+    not_assigned = []
+    for idx, loc in enumerate(request.locations):
+        if idx == request.depot:
+            continue
+        name = getattr(loc, 'name', f"ID {idx}")
+        why = []
+        if hasattr(loc, 'required_skills') and loc.required_skills:
+            why.append(f"skills requeridos: {loc.required_skills}")
+        if hasattr(loc, 'weight') and hasattr(request.vehicles[0], 'capacity_weight'):
+            why.append(f"peso: {getattr(loc, 'weight', 0)}")
+        if hasattr(loc, 'volume') and hasattr(request.vehicles[0], 'capacity_volume'):
+            why.append(f"volumen: {getattr(loc, 'volume', 0)}")
+        if hasattr(loc, 'demand') and hasattr(request.vehicles[0], 'capacity_quantity'):
+            why.append(f"demand: {getattr(loc, 'demand', 0)}")
+        if hasattr(loc, 'time_window'):
+            why.append(f"ventana: {getattr(loc, 'time_window', [])}")
+        not_assigned.append(f"{name} (" + ", ".join(why) + ")")
+    warnings_out = [matrix_warning] if matrix_warning else []
     if not solution:
-        return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=["No se encontró solución factible para las restricciones dadas. Revise: habilidades requeridas y ofrecidas, capacidades de los vehículos y ventanas de tiempo."])
+        if not_assigned:
+            warnings_out.append(f"No se pudo asignar: {', '.join(not_assigned)}")
+        else:
+            warnings_out.append("No se encontró solución factible para las restricciones dadas. Revise: habilidades requeridas y ofrecidas, capacidades de los vehículos y ventanas de tiempo.")
+        return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=warnings_out)
 
     # --- Procesamiento de resultados ---
     routes = []
