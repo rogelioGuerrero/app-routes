@@ -119,8 +119,19 @@ async def vrp_v1(request: VRPSkillsRequest):
         routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
     solution = routing.SolveWithParameters(search_parameters)
 
+    t1 = time.perf_counter()
+    metadata = {
+        "computation_time_ms": int((t1-t0)*1000),
+        "num_vehicles": getattr(request, 'num_vehicles', len(getattr(request, 'vehicles', []))),
+        "num_clients": len(getattr(request, 'locations', [])) - 1 if hasattr(request, 'locations') else None,
+        "strict_mode": getattr(request, 'strict_mode', False),
+        "buffer_minutes": getattr(request, 'buffer_minutes', 10),
+        "peak_hours": getattr(request, 'peak_hours', None),
+        "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
+    }
+
     if not solution:
-        return VRPAdvancedResponse(solution={}, metadata={}, warnings=["No se encontró solución factible para las restricciones dadas. Revise: habilidades requeridas y ofrecidas, capacidades de los vehículos y ventanas de tiempo."])
+        return VRPAdvancedResponse(solution={}, metadata=metadata, warnings=["No se encontró solución factible para las restricciones dadas. Revise: habilidades requeridas y ofrecidas, capacidades de los vehículos y ventanas de tiempo."])
 
     # --- Procesamiento de resultados ---
     routes = []
