@@ -125,9 +125,55 @@ async def vrp_v1(request: VRPSkillsRequest):
     # --- Procesamiento de resultados ---
     routes = []
     total_distance = 0
+    assigned_nodes = set()
+    for vehicle_id in range(request.num_vehicles):
+        index = routing.Start(vehicle_id)
+        route = []
+        route_distance = 0
+        while not routing.IsEnd(index):
+            node_index = manager.IndexToNode(index)
+            route.append(node_index)
+            assigned_nodes.add(node_index)
+            previous_index = index
+            index = solution.Value(routing.NextVar(index))
+            route_distance += routing.GetArcCostForVehicle(previous_index, index, vehicle_id)
+        route.append(manager.IndexToNode(index))
+        routes.append({
+            "vehicle_id": vehicle_id,
+            "route": route,
+            "route_distance": route_distance
+        })
+        total_distance += route_distance
+
+    # --- Warning enriquecido: ubicaciones no atendidas ---
+    not_assigned = []
+    for idx, loc in enumerate(request.locations):
+        if idx == request.depot:
+            continue
+        if idx not in assigned_nodes:
+            name = getattr(loc, 'name', f"ID {idx}")
+            why = []
+            if hasattr(loc, 'required_skills') and loc.required_skills:
+                why.append(f"skills requeridos: {loc.required_skills}")
+            if hasattr(loc, 'weight') and hasattr(request.vehicles[0], 'capacity_weight'):
+                why.append(f"peso: {getattr(loc, 'weight', 0)}")
+            if hasattr(loc, 'volume') and hasattr(request.vehicles[0], 'capacity_volume'):
+                why.append(f"volumen: {getattr(loc, 'volume', 0)}")
+            if hasattr(loc, 'demand') and hasattr(request.vehicles[0], 'capacity_quantity'):
+                why.append(f"demand: {getattr(loc, 'demand', 0)}")
+            if hasattr(loc, 'time_window'):
+                why.append(f"ventana: {getattr(loc, 'time_window', [])}")
+            not_assigned.append(f"{name} (" + ", ".join(why) + ")")
+    warnings_out = [matrix_warning] if matrix_warning else []
+    if not_assigned:
+        warnings_out.append(f"No se pudo asignar: {', '.join(not_assigned)}")
+
+    t1 = time.perf_counter()
+    metadata = {"computation_time_ms": int((t1-t0)*1000)}
+
     route_details = []
     arrival_times = []
-    def build_route(vehicle_id):
+    for vehicle_id in range(request.num_vehicles):
         index = routing.Start(vehicle_id)
         route = []
         route_distance = 0
