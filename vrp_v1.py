@@ -24,13 +24,13 @@ async def vrp_v1(request: VRPSkillsRequest):
     # Validación robusta de entrada y casos límite
     valid, early_warnings, early_solution = validate_full_request(request)
     if not valid:
-        return VRPAdvancedResponse(solution=early_solution, metadata={}, warnings=early_warnings)
+        return VRPAdvancedResponse(solution={}, metadata={}, warnings=early_warnings)
     # Si strict_mode está activo, el validador ya lanza error si hay ubicaciones imposibles
     # Si no, se permite penalización y solución parcial (lógica ya implementada en el solver)
 
     warnings = validate_skills_and_capacities(request)
     if warnings:
-        return VRPAdvancedResponse(solution=None, metadata={}, warnings=warnings)
+        return VRPAdvancedResponse(solution={}, metadata={}, warnings=warnings)
 
     # Construcción de matrices con fallback
     try:
@@ -120,7 +120,7 @@ async def vrp_v1(request: VRPSkillsRequest):
     solution = routing.SolveWithParameters(search_parameters)
 
     if not solution:
-        return VRPAdvancedResponse(solution=None, metadata={}, warnings=["No se encontró solución factible para las restricciones dadas. Revise: habilidades requeridas y ofrecidas, capacidades de los vehículos y ventanas de tiempo."])
+        return VRPAdvancedResponse(solution={}, metadata={}, warnings=["No se encontró solución factible para las restricciones dadas. Revise: habilidades requeridas y ofrecidas, capacidades de los vehículos y ventanas de tiempo."])
 
     # --- Procesamiento de resultados ---
     routes = []

@@ -228,18 +228,18 @@ def add_capacity_dimensions(routing, manager, request):
             return callback
         callback = make_callback(cap_name)
         cb_index = routing.RegisterTransitCallback(callback)
-        max_cap = max(getattr(v, veh_attr, 0) or 0 for v in request.vehicles)
+        max_cap = max(int(getattr(v, veh_attr, 0) or 0) for v in request.vehicles)
         routing.AddDimension(
             cb_index,
             0,  # No slack
-            max_cap,
+            int(max_cap),
             True,  # start cumul to zero
             cap_name.capitalize()
         )
         dim = routing.GetDimensionOrDie(cap_name.capitalize())
         # Limita la capacidad máxima por vehículo
         for vehicle_id, v in enumerate(request.vehicles):
-            dim.CumulVar(routing.Start(vehicle_id)).SetMax(getattr(v, veh_attr, 0) or 0)
+            dim.CumulVar(routing.Start(vehicle_id)).SetMax(int(getattr(v, veh_attr, 0) or 0))
 
 # --- Penalizaciones para skills y ventanas de tiempo ---
 def apply_skills_penalty(routing, manager, request, vehicle_skills, location_skills, penalty=100_000):
