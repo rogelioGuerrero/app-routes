@@ -81,12 +81,13 @@ class VRPCapacityRequest(BaseModel):
     use_weight: Optional[bool] = False
     use_volume: Optional[bool] = False
 
+class RouteDetail(BaseModel):
+    vehicle_id: int
+    route: List[int]
+    distance_km: float
+    stops: List[dict]  # Cada dict: llegada, servicio, espera, etc.
+
 class VRPAdvancedResponse(BaseModel):
-    routes: List[List[int]]
-    total_distance: float
-    details: Optional[List[str]] = None
-    arrival_times: Optional[List[List[int]]] = None
-    arrival_times_formatted: Optional[List[List[str]]] = None
+    solution: dict  # Rutas, distancias, detalles, arrival_times, polylines...
+    metadata: dict  # Info adicional (ej: tiempo de cómputo)
     warnings: Optional[List[str]] = None
-    route_polylines: Optional[List[str]] = None
-    route_geojson: Optional[List[dict]] = None

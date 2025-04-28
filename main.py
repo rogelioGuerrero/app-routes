@@ -7,6 +7,7 @@ from vrp_advanced import router as vrp_advanced_router
 from vrp_capacity import router as vrp_capacity_router
 from vrp_skills import router as vrp_skills_router
 from vrp_skills_check import router as vrp_skills_check_router
+from vrp_v1 import router as vrp_v1_router
 
 app = FastAPI(
     title="Optimizador de Rutas para PYMES",
@@ -30,6 +31,7 @@ app.include_router(vrp_advanced_router)
 app.include_router(vrp_capacity_router)
 app.include_router(vrp_skills_router)
 app.include_router(vrp_skills_check_router)
+app.include_router(vrp_v1_router)
 
 @app.get("/")
 def root():

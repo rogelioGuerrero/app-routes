@@ -43,23 +43,51 @@
             </div>
 
             <div>
-                <details id="json-details">
-                    <summary class="cursor-pointer text-lg font-semibold mb-2 text-gray-800 select-none">Entrada JSON <span id="json-toggle-icon"></span></summary>
-                    <pre id="json-input" class="bg-gray-50 p-3 rounded-md text-xs overflow-auto h-64 border border-gray-200"></pre>
-                </details>
-            </div>
+    <details id="narrativa-vehiculos" open>
+        <summary class="cursor-pointer text-lg font-semibold mb-2 text-gray-800 select-none">Descripción de la flota de vehículos <span id="narrativa-vehiculos-icon"></span></summary>
+        <div id="narrativa-vehiculos-content" class="bg-green-50 p-3 rounded-md text-sm border border-green-200 mb-3 max-h-64 overflow-auto"></div>
+    </details>
+</div>
+<div>
+    <details id="narrativa-details">
+        <summary class="cursor-pointer text-lg font-semibold mb-2 text-gray-800 select-none">Descripción de los clientes <span id="narrativa-toggle-icon"></span></summary>
+        <div id="narrativa-clientes" class="bg-yellow-50 p-3 rounded-md text-sm border border-yellow-200 mb-3 max-h-64 overflow-auto"></div>
+    </details>
+</div>
+<div>
+    <details id="json-details">
+        <summary class="cursor-pointer text-lg font-semibold mb-2 text-gray-800 select-none">Entrada JSON <span id="json-toggle-icon"></span></summary>
+        <pre id="json-input" class="bg-gray-50 p-3 rounded-md text-xs overflow-auto h-64 border border-gray-200"></pre>
+    </details>
+</div>
 
-            <div>
-                <h3 class="text-lg font-semibold mb-2 text-gray-800">Resultado:</h3>
-                <div id="results-output" class="bg-green-50 p-3 rounded-md text-sm border border-green-200 h-24 overflow-auto">
-                    Seleccione un escenario y presione "Simular Optimización".
-                </div>
-            </div>
+<!-- Bloque para mostrar la respuesta JSON del backend -->
+<div>
+    <details id="json-response-details">
+        <summary class="cursor-pointer text-lg font-semibold mb-2 text-gray-800 select-none">Respuesta JSON del backend <span id="json-response-toggle-icon"></span></summary>
+        <pre id="json-response-output" class="bg-gray-50 p-3 rounded-md text-xs overflow-auto h-64 border border-gray-200"></pre>
+    </details>
+</div>
+
+<div id="bloque-narrativa-resultado" style="display:none">
+    <details id="narrativa-resultado-details" open>
+        <summary class="cursor-pointer text-lg font-semibold mb-2 text-gray-800 select-none">Narrativa del resultado <span id="narrativa-resultado-icon"></span></summary>
+        <div id="narrativa-resultado" class="bg-blue-50 p-3 rounded-md text-sm border border-blue-200 mb-3 max-h-64 overflow-auto"></div>
+    </details>
+</div>
+
+
         </div>
 
         <div class="md:col-span-2">
             <h3 class="text-lg font-semibold mb-2 text-gray-800 text-center">Mapa de Rutas</h3>
             <div id="map" class="w-full rounded-lg shadow border border-gray-300"></div>
+            <div class="w-full mt-4 flex flex-col items-center">
+                <h4 class="text-sm font-semibold mb-1 text-gray-600">Mini-mapa de Rutas</h4>
+                <div id="mini-mapa-rutas" style="width:320px; height:200px; border-radius:10px; border:1px solid #bbb;"></div>
+            </div>
+            <!-- Mensajes de estado/errores breves -->
+            <div id="results-output" class="bg-gray-50 p-3 rounded-md text-sm border border-gray-200 h-12 overflow-auto mt-4"></div>
         </div>
     </div>
 </div>
@@ -83,7 +111,7 @@ const lugaresSV = [
 ];
 
 // Skills ejemplo
-const allSkills = ["frío", "frágil", "urgente", "voluminoso"];
+const allSkills = ["frío", "frágil", "urgente", "voluminoso","cambiar","reparar","instalar"];
 
 // Descripciones narrativas por escenario
 const scenarioDescriptions = {
@@ -98,14 +126,18 @@ const scenarios = {
     basic_cvrp: {
         description: "Un vehículo parte del depósito para entregar a 9 clientes, respetando solo la capacidad.",
         input: {
-            locations: lugaresSV.map((loc, i) => ({
-                ...loc,
-                demand: i === 0 ? 0 : [2, 3, 1, 4, 2, 5, 2, 3, 2][i-1], // demandas variadas
-                weight: i === 0 ? 0 : [10, 8, 6, 12, 9, 7, 5, 11, 8][i-1],
-                volume: i === 0 ? 0 : [1, 2, 1.5, 2.5, 1, 3, 2, 1, 1.5][i-1],
-                time_window: null,
-                required_skills: []
-            })),
+            locations: [
+    { id: 0, name: "Depósito - San Salvador", lat: 13.6929, lon: -89.2182, demand: 0, weight: 0, volume: 0, time_window: null, required_skills: [] },
+    { id: 1, name: "Santa Tecla", lat: 13.6731, lon: -89.2797, demand: 1, weight: 10, volume: 1, time_window: null, required_skills: [] },
+    { id: 2, name: "Soyapango", lat: 13.7102, lon: -89.1399, demand: 1, weight: 8, volume: 2, time_window: null, required_skills: [] },
+    { id: 3, name: "Mejicanos", lat: 13.7405, lon: -89.2137, demand: 1, weight: 6, volume: 1.5, time_window: null, required_skills: [] },
+    { id: 4, name: "Apopa", lat: 13.8017, lon: -89.1792, demand: 1, weight: 12, volume: 2.5, time_window: null, required_skills: [] },
+    { id: 5, name: "Ilopango", lat: 13.7017, lon: -89.1185, demand: 1, weight: 9, volume: 1, time_window: null, required_skills: [] },
+    { id: 6, name: "San Marcos", lat: 13.6394, lon: -89.2036, demand: 1, weight: 7, volume: 3, time_window: null, required_skills: [] },
+    { id: 7, name: "Ciudad Delgado", lat: 13.7307, lon: -89.1638, demand: 1, weight: 5, volume: 2, time_window: null, required_skills: [] },
+    { id: 8, name: "Cuscatancingo", lat: 13.7364, lon: -89.2071, demand: 1, weight: 11, volume: 1, time_window: null, required_skills: [] },
+    { id: 9, name: "Ayutuxtepeque", lat: 13.7486, lon: -89.2136, demand: 1, weight: 8, volume: 1.5, time_window: null, required_skills: [] }
+],
             vehicles: [
                 {
                     id: 0,
@@ -293,42 +325,67 @@ function clearMap() {
     currentRoutes = [];
 }
 
-function drawMarkers(locations, depotId) {
+function drawMarkers(locations, depotId, allRouteOrders = null, showVisitOrder = false) {
     if (!map) return;
     clearMap();
     const bounds = [];
     locations.forEach(loc => {
+        // Busca en todas las rutas a qué vehículo(s) y orden(es) pertenece
+        let visitInfo = [];
+        if (showVisitOrder && Array.isArray(allRouteOrders)) {
+            allRouteOrders.forEach((route, vIdx) => {
+                if (Array.isArray(route)) {
+                    const idx = route.indexOf(loc.id);
+                    if (idx !== -1) {
+                        visitInfo.push({ visitNum: idx + 1, vehiculo: vIdx + 1, color: routeColors[vIdx % routeColors.length] });
+                    }
+                }
+            });
+        }
         const isDepot = loc.id === depotId;
-        const markerColor = isDepot ? 'red' : 'blue';
-        const iconHtml = `<div style="text-align: center;">
-            <svg height="20" width="20" viewbox="0 0 20 20" style="fill:${markerColor}; stroke: black; stroke-width: 1px;">
-                <circle cx="10" cy="10" r="8"/>
-            </svg>
-            <span class="${isDepot ? 'depot-icon-text' : 'customer-icon-text'}" style="font-size:10px; position:relative; top:-5px;">${isDepot ? 'D' : loc.id}</span>
-        </div>`;
-        const customIcon = L.divIcon({
-            html: iconHtml,
-            className: '',
-            iconSize: [20, 20],
-            iconAnchor: [10, 20],
-            popupAnchor: [0, -20]
-        });
-        const formatTime = (min) => {
+        // Color: si solo un vehículo visita, usa su color; si ninguno o varios, usa azul por defecto
+        let markerColor = 'blue';
+        if (isDepot) markerColor = 'red';
+        else if (visitInfo.length === 1) markerColor = visitInfo[0].color;
+        // Si más de un vehículo visita el punto, puedes usar un color neutro o el del primero
+        const iconHtml = `<div style="position: relative; width: 20px; height: 20px; display: inline-block; pointer-events: none;">
+    <svg height="20" width="20" viewBox="0 0 20 20" style="fill:${markerColor}; stroke: black; stroke-width: 1px; pointer-events: none;">
+        <circle cx="10" cy="10" r="8"/>
+    </svg>
+    ${isDepot
+        ? `<span style='position: absolute; top: 50%; left: 50%; transform: translate(-50%, -55%); color: white; font-size: 13px; font-weight: 900; z-index: 2; text-shadow: 0 0 3px #000, 1px 1px 2px #000;'>D</span>`
+        : (showVisitOrder && visitInfo.length > 0
+            ? `<span style='position: absolute; top: 50%; left: 50%; transform: translate(-50%, -55%); color: white; font-size: 13px; font-weight: 900; z-index: 2; text-shadow: 0 0 3px #000, 1px 1px 2px #000;'>${visitInfo.map(v => v.visitNum).join('/')}</span>`
+            : '')}
+</div>`;
+const customIcon = L.divIcon({
+    html: iconHtml,
+    className: '',
+    iconSize: [20, 20],
+    iconAnchor: [10, 20],
+    popupAnchor: [0, -20]
+});
+const formatTime = (min) => {
             const h = Math.floor(min / 60).toString().padStart(2, '0');
             const m = (min % 60).toString().padStart(2, '0');
             return `${h}:${m}`;
         };
         let popup = `<b>${loc.name} (ID: ${loc.id})</b><br>`;
+        if (showVisitOrder && visitInfo.length > 0) {
+            popup += `<span style='color:#16a34a;font-weight:bold'>Orden de visita: ${visitInfo.map(v => v.visitNum + ' (Vehículo ' + v.vehiculo + ')').join(', ')}</span><br>`;
+        }
+
         popup += `Paquetes: ${loc.demand || 0}`;
+
         if (loc.time_window && Array.isArray(loc.time_window) && loc.time_window.length === 2) {
             popup += `<br>Horario: <span style="color:#2563eb;font-weight:bold">${formatTime(loc.time_window[0])}-${formatTime(loc.time_window[1])}</span>`;
         }
         if (loc.required_skills && loc.required_skills.length > 0) {
             popup += `<br>Criterio: ${loc.required_skills.join(', ')}`;
         }
-        const marker = L.marker([loc.lat, loc.lon], {icon: customIcon})
-            .addTo(map)
-            .bindPopup(popup);
+        const marker = L.marker([loc.lat, loc.lon], {icon: customIcon, zIndexOffset: -50})
+    .addTo(map)
+    .bindPopup(popup);
         currentMarkers.push(marker);
         bounds.push([loc.lat, loc.lon]);
     });
@@ -339,63 +396,99 @@ function drawMarkers(locations, depotId) {
     }
 }
 
-// Dibuja rutas realistas (usando polylines o geojson si están disponibles)
+// Dibuja rutas realistas en el mapa usando GeoJSON, Polyline o líneas rectas simples
 function drawRoutes(data, locations) {
     if (!map) return;
+    // Limpia rutas anteriores
     currentRoutes.forEach(route => map.removeLayer(route));
     currentRoutes = [];
-    // Si hay polylines (Google encoded), decodifica y dibuja
-    if (data.route_polylines && Array.isArray(data.route_polylines)) {
-        data.route_polylines.forEach((poly, idx) => {
-            const latlngs = decodeGooglePolyline(poly);
-            if (latlngs.length > 1) {
-                const polyline = L.polyline(latlngs, {
-                    color: routeColors[idx % routeColors.length],
-                    weight: 3,
-                    opacity: 0.85
-                }).addTo(map);
-                polyline.bindTooltip(`Vehículo ${idx + 1}`, {sticky: true});
-                currentRoutes.push(polyline);
-            }
-        });
-        return;
-    }
-    // Si hay geojson
-    if (data.route_geojson && Array.isArray(data.route_geojson)) {
+
+    console.log('drawRoutes() called. Data:', data);
+
+    // 1. GeoJSON
+    if (data.route_geojson && Array.isArray(data.route_geojson) && data.route_geojson.length > 0) {
+        console.log('Intentando dibujar GeoJSON:', data.route_geojson);
         data.route_geojson.forEach((geo, idx) => {
             if (geo && geo.type === 'LineString' && Array.isArray(geo.coordinates)) {
-                // GeoJSON: [lon, lat] → Leaflet: [lat, lon]
-                const latlngs = geo.coordinates.map(([lon, lat]) => [lat, lon]);
+                const latlngs = geo.coordinates.map(coord => Array.isArray(coord) && coord.length === 2 ? [coord[1], coord[0]] : null).filter(Boolean);
+                console.log('Polyline GeoJSON latlngs:', latlngs);
                 if (latlngs.length > 1) {
-                    const polyline = L.polyline(latlngs, {
-                        color: routeColors[idx % routeColors.length],
-                        weight: 3,
-                        opacity: 0.85
-                    }).addTo(map);
-                    polyline.bindTooltip(`Vehículo ${idx + 1}`, {sticky: true});
-                    currentRoutes.push(polyline);
+    const polyline = L.polyline(latlngs, {
+        color: routeColors[idx % routeColors.length],
+        weight: 4,
+        opacity: 0.85
+    }).addTo(map);
+    polyline.bindTooltip(`Ruta Vehículo ${idx + 1} (GeoJSON)`, {sticky: true});
+    currentRoutes.push(polyline);
+    // Ajusta el mapa para mostrar la ruta
+    map.fitBounds(polyline.getBounds(), {padding: [30, 30]});
+} else {
+                    console.error('GeoJSON coordinates insuficientes para dibujar.');
+                }
+            } else {
+                console.error('GeoJSON inválido:', geo);
+            }
+        });
+        if (currentRoutes.length === 0) {
+            alert('No se pudo dibujar la ruta GeoJSON. Revisa la consola para más detalles.');
+        }
+        return;
+    }
+
+    // 2. Polyline
+    if (data.route_polylines && Array.isArray(data.route_polylines) && data.route_polylines.length > 0) {
+        console.log('Intentando dibujar polylines:', data.route_polylines);
+        data.route_polylines.forEach((poly, idx) => {
+            if (typeof poly === 'string' && poly.length > 0) {
+                const latlngs = decodeGooglePolyline(poly).map(pair => [pair[0], pair[1]]);
+                console.log('Polyline decoded latlngs:', latlngs);
+                if (latlngs.length > 1) {
+    const polyline = L.polyline(latlngs, {
+        color: routeColors[idx % routeColors.length],
+        weight: 4,
+        opacity: 0.85
+    }).addTo(map);
+    polyline.bindTooltip(`Ruta Vehículo ${idx + 1} (Polyline)`, {sticky: true});
+    currentRoutes.push(polyline);
+    // Ajusta el mapa para mostrar la ruta
+    map.fitBounds(polyline.getBounds(), {padding: [30, 30]});
+} else {
+                    console.error('Polyline coordinates insuficientes para dibujar.');
                 }
             }
         });
+        if (currentRoutes.length === 0) {
+            alert('No se pudo dibujar la ruta Polyline. Revisa la consola para más detalles.');
+        }
         return;
     }
-    // Si no, dibuja líneas rectas entre los puntos
-    const routesData = data.routes;
-    const locationMap = new Map(locations.map(loc => [loc.id, [loc.lat, loc.lon]]));
-    if (!routesData || !Array.isArray(routesData)) return;
-    routesData.forEach((route, idx) => {
-        const routePoints = route.map(stopId => locationMap.get(stopId)).filter(p => p);
-        if (routePoints.length > 1) {
-            const polyline = L.polyline(routePoints, {
-                color: routeColors[idx % routeColors.length],
-                weight: 3,
-                opacity: 0.7
-            }).addTo(map);
-            polyline.bindTooltip(`Vehículo ${idx + 1}: ${route.join(' → ')}`, {sticky: true});
-            currentRoutes.push(polyline);
-        }
-    });
+
+    // 3. Simple
+    if (data.routes && Array.isArray(data.routes) && locations && Array.isArray(locations)) {
+        console.log('Intentando dibujar rutas simples:', data.routes);
+        const locationMap = new Map(locations.map(loc => [loc.id, [loc.lat, loc.lon]]));
+        data.routes.forEach((route, idx) => {
+            const routePoints = Array.isArray(route) ? route.map(stopId => locationMap.get(stopId)).filter(Boolean) : [];
+            console.log('RoutePoints:', routePoints);
+            if (routePoints.length > 1) {
+    const polyline = L.polyline(routePoints, {
+        color: routeColors[idx % routeColors.length],
+        weight: 3,
+        opacity: 0.5,
+        dashArray: '7 7'
+    }).addTo(map);
+    polyline.bindTooltip(`Ruta Vehículo ${idx + 1} (Simple)`, {sticky: true});
+    currentRoutes.push(polyline);
+    // Ajusta el mapa para mostrar la ruta
+    map.fitBounds(polyline.getBounds(), {padding: [30, 30]});
 }
+        });
+        if (currentRoutes.length === 0) {
+            alert('No se pudo dibujar la ruta simple. Revisa la consola para más detalles.');
+        }
+    }
+}
+
 
 // Decodifica Google Polyline a [[lat, lon], ...]
 function decodeGooglePolyline(polylineStr) {
@@ -422,26 +515,115 @@ function decodeGooglePolyline(polylineStr) {
     return coordinates;
 }
 
+function minutosAHoraStr(minutos) {
+    const h = Math.floor(minutos / 60).toString().padStart(2, '0');
+    const m = (minutos % 60).toString().padStart(2, '0');
+    return `${h}:${m}`;
+}
+
+function generarNarrativaCliente(cliente) {
+    let frase = `El cliente ${cliente.id} que vive en ${cliente.name}`;
+    if (cliente.demand < 0) {
+        frase += ` nos entregará ${Math.abs(cliente.demand)} paquete${Math.abs(cliente.demand) > 1 ? 's' : ''}`;
+    } else if (cliente.demand > 0) {
+        frase += ` recibirá ${cliente.demand} paquete${cliente.demand > 1 ? 's' : ''}`;
+    }
+    if (cliente.demand !== 0) {
+        frase += `, que pesan ${cliente.weight} kg y ocupan ${cliente.volume} m³`;
+    }
+    if (Array.isArray(cliente.time_window) && cliente.time_window.length === 2) {
+        frase += `, en el horario de ${minutosAHoraStr(cliente.time_window[0])} a ${minutosAHoraStr(cliente.time_window[1])}`;
+    }
+    if (cliente.required_skills && cliente.required_skills.length > 0) {
+        frase += `, y nos indica que es/son ${cliente.required_skills.join(', ')}`;
+    }
+    frase += '.';
+    return frase;
+}
+
+function generarNarrativaVehiculo(vehiculo) {
+    let frase = `El vehículo ${vehiculo.id}`;
+    if (vehiculo.start_time !== undefined) {
+        frase += ` parte del depósito a las ${minutosAHoraStr(vehiculo.start_time)}`;
+    }
+    let capacidades = [];
+    if (vehiculo.capacity_weight !== undefined) capacidades.push(`${vehiculo.capacity_weight} kg`);
+    if (vehiculo.capacity_volume !== undefined) capacidades.push(`${vehiculo.capacity_volume} m³`);
+    if (vehiculo.capacity_quantity !== undefined) capacidades.push(`${vehiculo.capacity_quantity} paquetes`);
+    if (capacidades.length > 0) {
+        frase += ` y puede transportar hasta ${capacidades.join(', ')}`;
+    }
+    if (vehiculo.provided_skills && vehiculo.provided_skills.length > 0) {
+        frase += `. Tiene habilidades: ${vehiculo.provided_skills.join(', ')}`;
+    }
+    if (vehiculo.start_time !== undefined && vehiculo.end_time !== undefined) {
+        frase += `. Opera de ${minutosAHoraStr(vehiculo.start_time)} a ${minutosAHoraStr(vehiculo.end_time)}`;
+    }
+    frase += '.';
+    return frase;
+}
+
 function loadScenario(scenarioId) {
+    // Oculta narrativa de resultado hasta simular
+    const bloqueNarrativa = document.getElementById('bloque-narrativa-resultado');
+    if (bloqueNarrativa) bloqueNarrativa.style.display = 'none';
     const scenario = scenarios[scenarioId];
     if (!scenario) return;
+    // Narrativa de vehículos
+    const narrativaVehiculosDiv = document.getElementById('narrativa-vehiculos-content');
+    if (narrativaVehiculosDiv) {
+        narrativaVehiculosDiv.innerHTML = (scenario.input.vehicles || [])
+            .map(generarNarrativaVehiculo)
+            .map(txt => `<div class='mb-2'>${txt}</div>`)
+            .join('');
+    }
+    // Narrativa de clientes
+    const narrativaDiv = document.getElementById('narrativa-clientes');
+    if (narrativaDiv) {
+        narrativaDiv.innerHTML = scenario.input.locations
+            .filter(c => c.id !== scenario.input.depot)
+            .map(generarNarrativaCliente)
+            .map(txt => `<div class='mb-2'>${txt}</div>`)
+            .join('');
+    }
+
     document.getElementById('json-input').textContent = JSON.stringify(scenario.input, null, 2);
-    document.getElementById('results-output').textContent = 'Listo para simular.';
-    document.getElementById('results-output').className = 'bg-gray-50 p-3 rounded-md text-sm border border-gray-200 h-24 overflow-auto';
-    drawMarkers(scenario.input.locations, scenario.input.depot);
+    // Mostrar mensaje solo si existe el div
+    const resultsDiv = document.getElementById('results-output');
+    if (resultsDiv) {
+        resultsDiv.textContent = '';
+        resultsDiv.className = 'bg-gray-50 p-3 rounded-md text-sm border border-gray-200 h-12 overflow-auto';
+    }
+    // Si hay rutas optimizadas, pasa el orden de la primera ruta
+    drawMarkers(scenario.input.locations, scenario.input.depot, null, false);
 }
 
 async function simulateOptimization() {
     const selectedId = document.getElementById('scenario-select').value;
     const scenario = scenarios[selectedId];
     if (!scenario) return;
-    document.getElementById('results-output').textContent = 'Procesando...';
-    document.getElementById('results-output').className = 'bg-yellow-50 p-3 rounded-md text-sm border border-yellow-200 h-24 overflow-auto text-yellow-700';
+    // Mostrar mensaje solo si existe el div
+    const resultsDiv = document.getElementById('results-output');
+    if (resultsDiv) {
+        resultsDiv.textContent = 'Procesando...';
+        resultsDiv.className = 'bg-yellow-50 p-3 rounded-md text-sm border border-yellow-200 h-12 overflow-auto text-yellow-700';
+    }
 
     // Si hay respuesta fija, úsala y no llames a la API
     if (scenario.fixedResponse) {
+        // Mostrar JSON de respuesta fija
+        const jsonRespDiv = document.getElementById('json-response-output');
+        if (jsonRespDiv) {
+            jsonRespDiv.textContent = JSON.stringify(scenario.fixedResponse, null, 2);
+        }
         // Dibuja rutas si existen
         drawRoutes(scenario.fixedResponse, scenario.input.locations);
+        // Muestra orden de visita en los marcadores (primera ruta)
+        if (scenario.fixedResponse.routes && scenario.fixedResponse.routes.length > 0) {
+            drawMarkers(scenario.input.locations, scenario.input.depot, scenario.fixedResponse.routes, true);
+        } else {
+            drawMarkers(scenario.input.locations, scenario.input.depot, null, false);
+        }
         mostrarResultadoNarrativo(scenario.fixedResponse, scenario);
         return;
     }
@@ -457,17 +639,36 @@ async function simulateOptimization() {
         }
         const data = await response.json();
 
+        // Mostrar JSON de respuesta backend
+        const jsonRespDiv = document.getElementById('json-response-output');
+        if (jsonRespDiv) {
+            jsonRespDiv.textContent = JSON.stringify(data, null, 2);
+        }
         // Dibuja rutas si existen
         drawRoutes(data, scenario.input.locations);
+        // Muestra orden de visita en los marcadores (primera ruta)
+        if (data.routes && Array.isArray(data.routes) && data.routes.length > 0) {
+            drawMarkers(scenario.input.locations, scenario.input.depot, data.routes, true);
+        } else {
+            drawMarkers(scenario.input.locations, scenario.input.depot, null, false);
+        }
         mostrarResultadoNarrativo(data, scenario);
     } catch (error) {
-        document.getElementById('results-output').textContent = 'Error: ' + error.message;
-        document.getElementById('results-output').className = 'bg-red-50 p-3 rounded-md text-sm border border-red-200 h-24 overflow-auto text-red-700';
+        const resultsDiv = document.getElementById('results-output');
+        if (resultsDiv) {
+            resultsDiv.textContent = 'Error: ' + error.message;
+            resultsDiv.className = 'bg-red-50 p-3 rounded-md text-sm border border-red-200 h-12 overflow-auto text-red-700';
+        }
     }
 }
 
 // Muestra el resultado con narrativa mejorada (puede usarse tanto para fixedResponse como para respuesta de API)
 function mostrarResultadoNarrativo(data, scenario) {
+    // Muestra el bloque colapsable de narrativa resultado
+    const bloqueNarrativa = document.getElementById('bloque-narrativa-resultado');
+    if (bloqueNarrativa) bloqueNarrativa.style.display = '';
+    const narrativaDiv = document.getElementById('narrativa-resultado');
+    let narrativa = '';
     let msg = '';
     const locations = scenario.input.locations;
     // 1. Mostrar rutas por vehículo
@@ -478,14 +679,28 @@ function mostrarResultadoNarrativo(data, scenario) {
                 const loc = locations.find(l => l.id === id);
                 return loc ? loc.name : id;
             }).join(' → ');
+            // Distancia
             if (data.total_distance && Array.isArray(data.total_distance)) {
-                msg += ` <br>Distancia: ${data.total_distance[vIdx]?.toFixed(2) || '?'} km`;
+                msg += ` <br><b>Distancia recorrida:</b> ${data.total_distance[vIdx]?.toFixed(2) || '?'} km`;
             }
-            msg += '<br>';
-            // Paradas detalladas
-            if (data.details && Array.isArray(data.details) && data.details[vIdx]) {
-                msg += data.details[vIdx].replace(/\n/g, '<br>');
-            }
+            // Resumen de paradas
+            let totalEntregados = 0, totalRecibidos = 0, totalPeso = 0;
+            let paradas = route.slice(1, -1); // sin depósito
+            msg += '<br><b>Detalle de paradas:</b><ul style="padding-left:1em">';
+            paradas.forEach((pid, idx) => {
+                const loc = locations.find(l => l.id === pid);
+                if (!loc) return;
+                let llegada = (data.arrival_times_formatted && data.arrival_times_formatted[vIdx] && data.arrival_times_formatted[vIdx][idx]) ? data.arrival_times_formatted[vIdx][idx] : '?';
+                let servicio = 5; // asume 5min si no hay más datos
+                let espera = 0; // si tienes datos reales, cámbialo
+                let tipo = '';
+                if (loc.demand < 0) { totalRecibidos += Math.abs(loc.demand); tipo = 'Recogida'; }
+                else if (loc.demand > 0) { totalEntregados += loc.demand; tipo = 'Entrega'; }
+                totalPeso += loc.weight || 0;
+                msg += `<li><b>${loc.name}</b> (${tipo ? tipo : 'Visita'}) — Llegada: ${llegada}, servicio: ${servicio} min, peso: ${loc.weight} kg, paquetes: ${Math.abs(loc.demand)}, espera: ${espera} min</li>`;
+            });
+            msg += '</ul>';
+            msg += `<b>Total paquetes entregados:</b> ${totalEntregados} &nbsp; <b>Recibidos:</b> ${totalRecibidos} &nbsp; <b>Peso total:</b> ${totalPeso} kg`;
             // Horarios de llegada
             if (data.arrival_times_formatted && Array.isArray(data.arrival_times_formatted) && data.arrival_times_formatted[vIdx]) {
                 msg += `<br>Horarios de llegada: ${data.arrival_times_formatted[vIdx].join(', ')}`;
@@ -502,6 +717,8 @@ function mostrarResultadoNarrativo(data, scenario) {
         msg += `<br><b>Distancia total:</b> ${data.total_distance.toFixed(2)} km`;
     }
     if (!msg) msg = "Optimización realizada. Revisa el mapa.";
+    // Poner narrativa en el colapsable
+    if (narrativaDiv) narrativaDiv.innerHTML = msg;
     document.getElementById('results-output').innerHTML = msg;
     document.getElementById('results-output').className = 'bg-green-50 p-3 rounded-md text-sm border border-green-200 h-24 overflow-auto text-green-700';
 }
@@ -529,6 +746,7 @@ document.addEventListener('DOMContentLoaded', () => {
         attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
+
     // Cargar escenario inicial
     const initialScenarioId = document.getElementById('scenario-select').value;
     loadScenario(initialScenarioId);
@@ -541,7 +759,111 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.getElementById('optimize-button').addEventListener('click', simulateOptimization);
+
+    // Inicializar mini-mapa tras cargar la página
+    initMiniMap();
 });
+
+// --- Mini-mapa de solo rutas ---
+let miniMap = null;
+let miniRoutes = [];
+
+function clearMiniMap() {
+    if (!miniMap) return;
+    miniRoutes.forEach(r => miniMap.removeLayer(r));
+    miniRoutes = [];
+}
+
+function drawMiniRoutes(data, locations) {
+    if (!miniMap) return;
+    clearMiniMap();
+    // 1. GeoJSON
+    if (data.route_geojson && Array.isArray(data.route_geojson) && data.route_geojson.length > 0) {
+        data.route_geojson.forEach((geo, idx) => {
+            if (geo && geo.type === 'LineString' && Array.isArray(geo.coordinates)) {
+                const latlngs = geo.coordinates.map(coord => Array.isArray(coord) && coord.length === 2 ? [coord[1], coord[0]] : null).filter(Boolean);
+                if (latlngs.length > 1) {
+                    const polyline = L.polyline(latlngs, {
+                        color: routeColors[idx % routeColors.length],
+                        weight: 4,
+                        opacity: 0.85
+                    }).addTo(miniMap);
+                    miniRoutes.push(polyline);
+                }
+            }
+        });
+        if (miniRoutes.length > 0) {
+            miniMap.fitBounds(miniRoutes[0].getBounds(), {padding: [10, 10]});
+        }
+        return;
+    }
+    // 2. Polyline
+    if (data.route_polylines && Array.isArray(data.route_polylines) && data.route_polylines.length > 0) {
+        data.route_polylines.forEach((poly, idx) => {
+            if (typeof poly === 'string' && poly.length > 0) {
+                const latlngs = decodeGooglePolyline(poly).map(pair => [pair[0], pair[1]]);
+                if (latlngs.length > 1) {
+                    const polyline = L.polyline(latlngs, {
+                        color: routeColors[idx % routeColors.length],
+                        weight: 4,
+                        opacity: 0.85
+                    }).addTo(miniMap);
+                    miniRoutes.push(polyline);
+                }
+            }
+        });
+        if (miniRoutes.length > 0) {
+            miniMap.fitBounds(miniRoutes[0].getBounds(), {padding: [10, 10]});
+        }
+        return;
+    }
+    // 3. Simple
+    if (data.routes && Array.isArray(data.routes) && locations && Array.isArray(locations)) {
+        const locationMap = new Map(locations.map(loc => [loc.id, [loc.lat, loc.lon]]));
+        data.routes.forEach((route, idx) => {
+            const routePoints = Array.isArray(route) ? route.map(stopId => locationMap.get(stopId)).filter(Boolean) : [];
+            if (routePoints.length > 1) {
+                const polyline = L.polyline(routePoints, {
+                    color: routeColors[idx % routeColors.length],
+                    weight: 3,
+                    opacity: 0.7,
+                    dashArray: '7 7'
+                }).addTo(miniMap);
+                miniRoutes.push(polyline);
+            }
+        });
+        if (miniRoutes.length > 0) {
+            miniMap.fitBounds(miniRoutes[0].getBounds(), {padding: [10, 10]});
+        }
+    }
+}
+
+function initMiniMap() {
+    if (miniMap) return;
+    miniMap = L.map('mini-mapa-rutas', {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: false,
+        scrollWheelZoom: false,
+        doubleClickZoom: false,
+        boxZoom: false,
+        keyboard: false,
+        tap: false,
+        touchZoom: false,
+        inertia: false
+    }).setView(defaultCoords, 11);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19
+    }).addTo(miniMap);
+}
+
+// Hook para actualizar el mini-mapa cada vez que se dibujan rutas
+const _originalDrawRoutes = drawRoutes;
+drawRoutes = function(data, locations) {
+    _originalDrawRoutes(data, locations);
+    drawMiniRoutes(data, locations);
+};
+
         </script>
         
         </body>

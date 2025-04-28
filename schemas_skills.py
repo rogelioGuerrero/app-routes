@@ -29,10 +29,19 @@ class SkillsLocation(BaseModel):
     service_time: int = 5  # Tiempo de servicio en minutos (default=5)
     required_skills: Optional[List[str]] = []
 
+from typing import Optional
+
 class VRPSkillsRequest(BaseModel):
     locations: List[SkillsLocation]
     vehicles: List[SkillsVehicle]
     num_vehicles: int = 1
     depot: int = 0
+    strict_mode: Optional[bool] = False  # Si True, exige solución "todo o nada"; si False permite solución parcial
+    buffer_minutes: Optional[int] = 10  # Buffer de tráfico en minutos por trayecto (default 10)
+    peak_hours: Optional[list] = None  # Lista de franjas horarias [['07:00','09:00'], ...]
+    peak_buffer_minutes: Optional[int] = 20  # Buffer extra en minutos para horas pico (default 20)
+
     mode: Optional[str] = "driving"
     units: Optional[str] = "metric"
+    include_polylines: bool = True  # Si False, omite el cálculo de polylines
+    detail_level: str = "full"      # "minimal" o "full"; controla nivel de detalle en la respuesta
