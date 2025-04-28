@@ -169,7 +169,15 @@ async def vrp_v1(request: VRPSkillsRequest):
         warnings_out.append(f"No se pudo asignar: {', '.join(not_assigned)}")
 
     t1 = time.perf_counter()
-    metadata = {"computation_time_ms": int((t1-t0)*1000)}
+    metadata = {
+        "computation_time_ms": int((t1-t0)*1000),
+        "num_vehicles": getattr(request, 'num_vehicles', len(getattr(request, 'vehicles', []))),
+        "num_clients": len(getattr(request, 'locations', [])) - 1 if hasattr(request, 'locations') else None,
+        "strict_mode": getattr(request, 'strict_mode', False),
+        "buffer_minutes": getattr(request, 'buffer_minutes', 10),
+        "peak_hours": getattr(request, 'peak_hours', None),
+        "peak_buffer_minutes": getattr(request, 'peak_buffer_minutes', 20)
+    }
 
     route_details = []
     arrival_times = []
