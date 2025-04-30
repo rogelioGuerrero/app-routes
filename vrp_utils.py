@@ -6,6 +6,9 @@ from math import sqrt
 
 # --- Constantes ---
 class VRPConstants:
+    """
+    Constantes globales para la configuración del VRP.
+    """
     WORKDAY_START_MIN = 420  # 07:00
     WORKDAY_END_MIN = 1080   # 18:00
     DEFAULT_SERVICE_TIME_MIN = 5
@@ -14,6 +17,8 @@ class VRPConstants:
     DEFAULT_SOLVER_TIMEOUT_SEC = 30
     MAX_LOCATIONS = 100   # Puedes ajustar según tu servidor
     MAX_VEHICLES = 10
+    SKILL_PENALTY = 100_000
+    TIME_WINDOW_PENALTY = 100_000
 
 # --- Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -21,101 +26,252 @@ logger = logging.getLogger(__name__)
 
 # --- Excepciones personalizadas ---
 class GoogleAPIError(Exception):
+    """Excepción para errores relacionados con la API de Google."""
     pass
 
 class SolverError(Exception):
+    """Excepción para errores del solver de rutas."""
     pass
 
+# --- Utilidades para advertencias y sugerencias ---
+def add_warning(warnings_list, code, message, context=None):
+    """
+    Agrega una advertencia estandarizada a la lista.
+    """
+    warnings_list.append({
+        "type": "warning",
+        "code": code,
+        "message": message,
+        "context": context or {}
+    })
+
+def add_suggestion(suggestions_list, code, message, context=None):
+    """
+    Agrega una sugerencia estandarizada a la lista.
+    """
+    suggestions_list.append({
+        "type": "suggestion",
+        "code": code,
+        "message": message,
+        "context": context or {}
+    })
+
+# Helpers para advertencias comunes
+
+def warn_matrix_fallback(warnings_list, error_msg):
+    add_warning(
+        warnings_list,
+        code="MATRIX_FALLBACK",
+        message="Se usó matriz euclidiana por error en API externa",
+        context={"error": str(error_msg)}
+    )
+
+def warn_no_viable_clients(warnings_list, excluded_clients):
+    add_warning(
+        warnings_list,
+        code="NO_VIABLE_CLIENTS",
+        message="No hay clientes viables para ruteo (excluidos por skills o capacidades)",
+        context={"excluded_clients": excluded_clients}
+    )
+
 # --- Utilidades ---
+def filter_viable_clients(locations, vehicles, depot_idx=0):
+    """
+    Filtra ubicaciones que pueden ser atendidas por algún vehículo (skills y capacidades).
+    Retorna (viables, excluidos).
+    """
+    viables = []
+    excluidos = []
+    for idx, loc in enumerate(locations):
+        if idx == depot_idx:
+            viables.append(loc)
+            continue
+        skill_ok = any(
+            all(skill in v.provided_skills for skill in getattr(loc, 'required_skills', []))
+            for v in vehicles
+        ) if getattr(loc, 'required_skills', None) else True
+        capacity_ok = any(
+            (getattr(loc, 'weight', 0) <= getattr(v, 'capacity_weight', 1e9)) and
+            (getattr(loc, 'volume', 0) <= getattr(v, 'capacity_volume', 1e9)) and
+            (getattr(loc, 'demand', 0) <= getattr(v, 'capacity_quantity', 1e9))
+            for v in vehicles
+        )
+        if skill_ok and capacity_ok:
+            viables.append(loc)
+        else:
+            excluidos.append(getattr(loc, 'name', getattr(loc, 'id', idx)))
+    return viables, excluidos
+
 def min_to_hhmm(m: int) -> str:
+    """
+    Convierte minutos a formato HH:MM.
+    """
     h = int(m) // 60
     mm = int(m) % 60
     return f"{h:02d}:{mm:02d}"
 
 
 def validate_request_coords(request) -> None:
+    """
+    Valida que todas las ubicaciones tengan coordenadas.
+    """
     for loc in request.locations:
         if not hasattr(loc, 'lat') or not hasattr(loc, 'lon'):
+            logger.error(f"Ubicación {loc.name} no tiene coordenadas")
             raise HTTPException(status_code=400, detail=f"Ubicación {loc.name} no tiene coordenadas")
 
 
-def validate_full_request(request):
-    # Límite de ubicaciones y vehículos
-    if len(request.locations) > VRPConstants.MAX_LOCATIONS:
-        raise HTTPException(status_code=400, detail=f"Demasiadas ubicaciones (máximo {VRPConstants.MAX_LOCATIONS})")
-    if len(request.vehicles) > VRPConstants.MAX_VEHICLES:
-        raise HTTPException(status_code=400, detail=f"Demasiados vehículos (máximo {VRPConstants.MAX_VEHICLES})")
-    # Depot válido
-    if request.depot < 0 or request.depot >= len(request.locations):
-        raise HTTPException(status_code=400, detail="Índice de depósito inválido")
-    # Ventanas de tiempo válidas
-    for loc in request.locations:
+def validate_time_windows(locations):
+    """
+    Valida que las ventanas de tiempo sean correctas.
+    """
+    for loc in locations:
         if loc.time_window:
             if len(loc.time_window) != 2 or loc.time_window[0] > loc.time_window[1] or loc.time_window[0] < 0:
+                logger.error(f"Ventana de tiempo inválida en {getattr(loc, 'name', loc.id)}")
                 raise HTTPException(status_code=400, detail=f"Ventana de tiempo inválida en {getattr(loc, 'name', loc.id)}")
-    # Coherencia vehículos
+
+
+def validate_vehicle_consistency(request):
+    """
+    Valida la coherencia entre num_vehicles y la lista de vehículos.
+    """
     if request.num_vehicles != len(request.vehicles):
+        logger.error("num_vehicles no coincide con la lista de vehículos")
         raise HTTPException(status_code=400, detail="num_vehicles no coincide con la lista de vehículos")
-    # Al menos un vehículo
     if not request.vehicles or len(request.vehicles) == 0:
+        logger.error("No se proporcionaron vehículos")
         raise HTTPException(status_code=400, detail="No se proporcionaron vehículos")
-    # Caso solo depósito
+
+
+def validate_full_request(request):
+    """
+    Valida la petición completa y devuelve advertencias estructuradas y diagnóstico si algo falla.
+    Retorna (is_valid, warnings, diagnostics)
+    """
+    warnings = []
+    diagnostics = {}
+    # Limites de ubicaciones y vehículos
+    if len(request.locations) > VRPConstants.MAX_LOCATIONS:
+        add_warning(warnings, code="TOO_MANY_LOCATIONS", message=f"Demasiadas ubicaciones (máximo {VRPConstants.MAX_LOCATIONS})")
+        diagnostics["max_locations"] = VRPConstants.MAX_LOCATIONS
+        return False, warnings, diagnostics
+    if len(request.vehicles) > VRPConstants.MAX_VEHICLES:
+        add_warning(warnings, code="TOO_MANY_VEHICLES", message=f"Demasiados vehículos (máximo {VRPConstants.MAX_VEHICLES})")
+        diagnostics["max_vehicles"] = VRPConstants.MAX_VEHICLES
+        return False, warnings, diagnostics
+    if request.depot < 0 or request.depot >= len(request.locations):
+        add_warning(warnings, code="INVALID_DEPOT_INDEX", message="Índice de depósito inválido")
+        diagnostics["depot_index"] = request.depot
+        return False, warnings, diagnostics
+    try:
+        validate_time_windows(request.locations)
+        validate_vehicle_consistency(request)
+    except HTTPException as e:
+        add_warning(warnings, code="VALIDATION_ERROR", message=str(e.detail))
+        diagnostics["validation_error"] = str(e.detail)
+        return False, warnings, diagnostics
     if len(request.locations) <= 1:
-        return False, ["Solo se proporcionó el depósito"], {"routes": [], "total_distance": 0}
-    # Validación estricta de skills/capacidades si strict_mode está activo
+        add_warning(warnings, code="ONLY_DEPOT", message="Solo se proporcionó el depósito")
+        diagnostics["routes"] = []
+        diagnostics["total_distance"] = 0
+        return False, warnings, diagnostics
     strict_mode = getattr(request, 'strict_mode', False)
     if strict_mode:
-        # Skills: cada ubicación debe ser cubrible por al menos un vehículo
-        for idx, loc in enumerate(request.locations):
-            req_skills = set(getattr(loc, 'required_skills', []) or [])
-            if not req_skills:
-                continue
-            cubre_alguien = any(req_skills.issubset(set(getattr(v, 'provided_skills', []) or [])) for v in request.vehicles)
-            if not cubre_alguien:
-                raise HTTPException(status_code=400, detail=f"Ubicación {getattr(loc, 'name', idx)} requiere skills no cubiertos por ningún vehículo")
-        # Capacidades: cada ubicación debe caber en algún vehículo
-        for idx, loc in enumerate(request.locations):
-            fits = False
-            for v in request.vehicles:
-                fits = True
-                if hasattr(loc, 'weight') and hasattr(v, 'capacity_weight'):
-                    fits = fits and (getattr(loc, 'weight', 0) <= getattr(v, 'capacity_weight', 0))
-                if hasattr(loc, 'volume') and hasattr(v, 'capacity_volume'):
-                    fits = fits and (getattr(loc, 'volume', 0) <= getattr(v, 'capacity_volume', 0))
-                if hasattr(loc, 'demand') and hasattr(v, 'capacity_quantity'):
-                    fits = fits and (getattr(loc, 'demand', 0) <= getattr(v, 'capacity_quantity', 0))
-                if fits:
-                    break
-            if not fits:
-                raise HTTPException(status_code=400, detail=f"Ubicación {getattr(loc, 'name', idx)} excede capacidades de todos los vehículos")
-    return True, [], None
+        try:
+            validate_skills_coverage(request)
+        except HTTPException as e:
+            add_warning(warnings, code="SKILLS_NOT_COVERED", message=str(e.detail))
+            diagnostics["skills"] = str(e.detail)
+            return False, warnings, diagnostics
+        try:
+            validate_capacity_coverage(request)
+        except HTTPException as e:
+            add_warning(warnings, code="CAPACITY_NOT_COVERED", message=str(e.detail))
+            diagnostics["capacities"] = str(e.detail)
+            return False, warnings, diagnostics
+    return True, warnings, diagnostics
+
+def validate_skills_coverage(request):
+    """
+    Valida que cada ubicación pueda ser cubierta por los skills de algún vehículo.
+    """
+    for idx, loc in enumerate(request.locations):
+        req_skills = set(getattr(loc, 'required_skills', []) or [])
+        if not req_skills:
+            continue
+        cubre_alguien = any(req_skills.issubset(set(getattr(v, 'provided_skills', []) or [])) for v in request.vehicles)
+        if not cubre_alguien:
+            logger.error(f"Ubicación {getattr(loc, 'name', idx)} requiere skills no cubiertos por ningún vehículo")
+            raise HTTPException(status_code=400, detail=f"Ubicación {getattr(loc, 'name', idx)} requiere skills no cubiertos por ningún vehículo")
+
+def validate_capacity_coverage(request):
+    """
+    Valida que cada ubicación pueda ser atendida por al menos un vehículo en cuanto a capacidades.
+    """
+    for idx, loc in enumerate(request.locations):
+        fits = False
+        for v in request.vehicles:
+            fits = True
+            if hasattr(loc, 'weight') and hasattr(v, 'capacity_weight'):
+                fits = fits and (getattr(loc, 'weight', 0) <= getattr(v, 'capacity_weight', 0) or 0)
+            if hasattr(loc, 'volume') and hasattr(v, 'capacity_volume'):
+                fits = fits and (getattr(loc, 'volume', 0) <= getattr(v, 'capacity_volume', 0) or 0)
+            if hasattr(loc, 'demand') and hasattr(v, 'capacity_quantity'):
+                fits = fits and (getattr(loc, 'demand', 0) <= getattr(v, 'capacity_quantity', 0) or 0)
+            if fits:
+                break
+        if not fits:
+            logger.error(f"Ubicación {getattr(loc, 'name', idx)} excede capacidades de todos los vehículos")
+            raise HTTPException(status_code=400, detail=f"Ubicación {getattr(loc, 'name', idx)} excede capacidades de todos los vehículos")
 
 def validate_skills_and_capacities(request) -> List[str]:
+    """
+    Devuelve advertencias detalladas si hay ubicaciones con skills no cubiertos por ningún vehículo,
+    o si hay capacidades excedidas, con sugerencias accionables para el usuario.
+    """
     warnings = []
-    vehicle_skills = [set(v.provided_skills or []) for v in request.vehicles]
-    location_skills = [set(l.required_skills or []) for l in request.locations]
+    vehicle_skills = [set(getattr(v, 'provided_skills', []) or []) for v in request.vehicles]
+    location_skills = [set(getattr(l, 'required_skills', []) or []) for l in request.locations]
     uncovered = []
     for idx, req_skills in enumerate(location_skills):
         if req_skills and not any(req_skills.issubset(vs) for vs in vehicle_skills):
-            uncovered.append((idx, req_skills))
+            missing = req_skills - set().union(*vehicle_skills)
+            name = getattr(request.locations[idx], 'name', f"ID {idx}")
+            uncovered.append((name, missing, req_skills))
     if uncovered:
-        all_vehicle_skills = set().union(*vehicle_skills)
-        for idx, req_skills in uncovered:
-            missing = req_skills - all_vehicle_skills
-            warnings.append(f"{request.locations[idx].name} (falta: {', '.join(missing)})")
-    # Capacidad
-    over_capacity = []
-    for loc in request.locations:
-        can_serve = any(
-            (getattr(loc, 'weight', 0) <= v.capacity_weight) and
-            (getattr(loc, 'volume', 0) <= v.capacity_volume) and
-            (getattr(loc, 'demand', 0) <= v.capacity_quantity)
-            for v in request.vehicles
-        )
-        if not can_serve:
-            over_capacity.append(loc.name)
-    if over_capacity:
-        warnings.append(f"Ubicaciones sobre capacidad: {', '.join(over_capacity)}")
+        msg = "Ubicaciones con habilidades no cubiertas: "
+        for name, missing, req_skills in uncovered:
+            msg += f"{name} (falta: {', '.join(missing)}; requeridas: {', '.join(req_skills)}), "
+        msg += "Agregue estas habilidades a algún vehículo para cubrir todas las ubicaciones."
+        warnings.append(msg)
+    # Advertencias de capacidades excedidas
+    for idx, loc in enumerate(request.locations):
+        if idx == getattr(request, 'depot', 0):
+            continue
+        fits = False
+        reasons = []
+        for v in request.vehicles:
+            fits_vehicle = True
+            if hasattr(loc, 'weight') and hasattr(v, 'capacity_weight'):
+                if getattr(loc, 'weight', 0) > getattr(v, 'capacity_weight', 0) or 0:
+                    fits_vehicle = False
+                    reasons.append(f"peso {getattr(loc, 'weight', 0)} > capacidad {getattr(v, 'capacity_weight', 0) or 0}")
+            if hasattr(loc, 'volume') and hasattr(v, 'capacity_volume'):
+                if getattr(loc, 'volume', 0) > getattr(v, 'capacity_volume', 0) or 0:
+                    fits_vehicle = False
+                    reasons.append(f"volumen {getattr(loc, 'volume', 0)} > capacidad {getattr(v, 'capacity_volume', 0) or 0}")
+            if hasattr(loc, 'demand') and hasattr(v, 'capacity_quantity'):
+                if getattr(loc, 'demand', 0) > getattr(v, 'capacity_quantity', 0) or 0:
+                    fits_vehicle = False
+                    reasons.append(f"demanda {getattr(loc, 'demand', 0)} > capacidad {getattr(v, 'capacity_quantity', 0) or 0}")
+            if fits_vehicle:
+                fits = True
+                break
+        if not fits and reasons:
+            name = getattr(loc, 'name', f"ID {idx}")
+            msg = f"Ubicación '{name}' excede capacidades de todos los vehículos: {', '.join(reasons)}. Considere aumentar la capacidad de algún vehículo."
+            warnings.append(msg)
     return warnings
 
 
@@ -247,10 +403,14 @@ def is_in_peak(hour_minute, peak_hours):
     return False
 
 def build_distance_and_time_matrices(request, api_key: str):
+    """
+    Construye las matrices de distancia y tiempo usando la API de Google Distance Matrix.
+    Incluye manejo robusto de errores y buffers para hora pico.
+    """
     buffer = getattr(request, 'buffer_minutes', 10) or 10
     peak_buffer = getattr(request, 'peak_buffer_minutes', 20) or 20
     peak_hours = getattr(request, 'peak_hours', None)
-    origins = [f"{loc.lat},{loc.lon}" for loc in request.locations]
+    origins = [f"{getattr(loc, 'lat', 0)},{getattr(loc, 'lon', 0)}" for loc in request.locations]
     url = "https://maps.googleapis.com/maps/api/distancematrix/json"
     params = {
         "origins": "|".join(origins),
@@ -260,55 +420,39 @@ def build_distance_and_time_matrices(request, api_key: str):
         "units": getattr(request, 'units', 'metric'),
     }
     import requests
-    resp = requests.get(url, params=params)
+    try:
+        resp = requests.get(url, params=params, timeout=30)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        logger.exception(f"Error consultando Google API: {str(e)}")
+        raise GoogleAPIError(f"Error de red al consultar Google Distance Matrix: {str(e)}")
     data = resp.json()
     if data.get("status") != "OK":
+        logger.error(f"Respuesta inválida de Google: {data}")
         raise GoogleAPIError(f"Respuesta inválida: {data}")
     n = len(request.locations)
-    distance_matrix = [[el["distance"]["value"]/1000 if el.get("distance") else VRPConstants.INF_DISTANCE for el in row["elements"]] for row in data["rows"]]
-    # Estimación simple: todos los trayectos inician a las 07:00 (puedes mejorar esto luego)
+    distance_matrix = [[el.get("distance", {}).get("value", VRPConstants.INF_DISTANCE) / 1000 for el in row["elements"]] for row in data["rows"]]
     base_time = parse_time_str("07:00")
     time_matrix = []
     for i, row in enumerate(data["rows"]):
         time_row = []
         for j, el in enumerate(row["elements"]):
-            t = el["duration"]["value"]//60 if el.get("duration") else VRPConstants.INF_DISTANCE
-            # Aplica buffer estándar
-            t_total = t + buffer
-            # Si inicia en hora pico, suma el extra
+            t = el.get("duration", {}).get("value", VRPConstants.INF_DISTANCE) // 60
+            t_total = t + buffer if t != VRPConstants.INF_DISTANCE else VRPConstants.INF_DISTANCE
             if is_in_peak(base_time, peak_hours):
                 t_total += peak_buffer
             time_row.append(t_total)
         time_matrix.append(time_row)
     return distance_matrix, time_matrix
 
-    origins = [f"{loc.lat},{loc.lon}" for loc in request.locations]
-    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-    params = {
-        "origins": "|".join(origins),
-        "destinations": "|".join(origins),
-        "mode": request.mode or "driving",
-        "units": request.units or "metric",
-        "key": api_key
-    }
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        logger.error(f"Error consultando Google API: {str(e)}")
-        raise GoogleAPIError(f"Error de red al consultar Google Distance Matrix: {str(e)}")
-    data = response.json()
-    if data.get("status") != "OK":
-        logger.error(f"Respuesta inválida de Google: {data}")
-        raise GoogleAPIError(f"Respuesta inválida: {data}")
-    n = len(request.locations)
-    distance_matrix = [[el["distance"]["value"]/1000 if el.get("distance") else VRPConstants.INF_DISTANCE for el in row["elements"]] for row in data["rows"]]
-    # Suma el buffer a cada trayecto
-    time_matrix = [[(el["duration"]["value"]//60 + buffer) if el.get("duration") else VRPConstants.INF_DISTANCE for el in row["elements"]] for row in data["rows"]]
-    return distance_matrix, time_matrix
-
 # --- API Key segura ---
 def load_api_key():
+    """
+    Carga y valida la API key de Google Maps desde variables de entorno.
+    Lanza un error si la clave es inválida o no está configurada.
+    """
+    from dotenv import load_dotenv
+    load_dotenv()
     import os
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key or not api_key.startswith("AIza"):
@@ -318,54 +462,54 @@ def load_api_key():
 # --- Dimensiones de capacidad para OR-Tools ---
 def add_capacity_dimensions(routing, manager, request):
     """
-    Añade dimensiones de capacidad (weight, volume, demand) al solver.
-    Solo se añade la dimensión si hay datos relevantes (>0) en las ubicaciones/vehículos.
+    Añade dimensiones de capacidad (weight, volume, demand) al solver de OR-Tools.
+    Cada dimensión es independiente y se modela como en la dimensión de tiempo.
+    Si alguna dimensión no se cumple, el solver penalizará la solución.
     """
-    from ortools.constraint_solver import routing_enums_pb2
-    capacities = [
-        ("weight", "capacity_weight"),
-        ("volume", "capacity_volume"),
-        ("demand", "capacity_quantity")
-    ]
-    for cap_name, veh_attr in capacities:
-        # ¿Hay alguna demanda/capacidad relevante?
-        has_data = any(getattr(loc, cap_name, 0) for loc in request.locations) and any(getattr(v, veh_attr, 0) for v in request.vehicles)
-        if not has_data:
-            continue
-        def make_callback(attr):
-            def callback(from_index, to_index):
+    for cap_name, attr_loc, attr_veh, dim_name in [
+        ("weight", "weight", "capacity_weight", "Weight"),
+        ("volume", "volume", "capacity_volume", "Volume"),
+        ("demand", "demand", "capacity_quantity", "Demand")
+    ]:
+        if any(getattr(loc, attr_loc, 0) > 0 for loc in request.locations) and any(getattr(v, attr_veh, 0) > 0 for v in request.vehicles):
+            def capacity_callback(from_index, to_index, attr=attr_loc):
                 from_node = manager.IndexToNode(from_index)
                 return int(getattr(request.locations[from_node], attr, 0) or 0)
-            return callback
-        callback = make_callback(cap_name)
-        cb_index = routing.RegisterTransitCallback(callback)
-        max_cap = max(int(getattr(v, veh_attr, 0) or 0) for v in request.vehicles)
-        routing.AddDimension(
-            cb_index,
-            0,  # No slack
-            int(max_cap),
-            True,  # start cumul to zero
-            cap_name.capitalize()
-        )
-        dim = routing.GetDimensionOrDie(cap_name.capitalize())
-        # Limita la capacidad máxima por vehículo
-        for vehicle_id, v in enumerate(request.vehicles):
-            dim.CumulVar(routing.Start(vehicle_id)).SetMax(int(getattr(v, veh_attr, 0) or 0))
+            callback_idx = routing.RegisterTransitCallback(capacity_callback)
+            max_cap = max(getattr(v, attr_veh, 0) or 0 for v in request.vehicles)
+            routing.AddDimension(
+                callback_idx,
+                0,  # sin holgura
+                int(max_cap),
+                True,  # acumulación desde cero (debe ser bool)
+                dim_name
+            )
+            dimension = routing.GetDimensionOrDie(dim_name)
+            # Limitar la capacidad máxima solo en el depósito de cada vehículo
+            for vehicle_id, v in enumerate(request.vehicles):
+                cap = getattr(v, attr_veh, 0) or 0
+                dimension.CumulVar(routing.Start(vehicle_id)).SetMax(int(cap))
+                # Opcional: también puedes limitar el final si lo deseas
+                # dimension.CumulVar(routing.End(vehicle_id)).SetMax(int(cap))
 
 # --- Penalizaciones para skills y ventanas de tiempo ---
 def apply_skills_penalty(routing, manager, request, vehicle_skills, location_skills, penalty=100_000):
     """
-    Permite penalizar la no visita de ubicaciones si ningún vehículo cubre los skills requeridos.
+    Penaliza la no visita de ubicaciones si ningún vehículo cubre los skills requeridos,
+    y restringe los vehículos permitidos por ubicación según skills.
     """
     for node_idx, req_skills in enumerate(location_skills):
         if not req_skills:
             continue
-        allowed_vehicles = [v_idx for v_idx, prov_skills in enumerate(vehicle_skills) if req_skills.issubset(prov_skills)]
+        allowed_vehicles = [
+            v_idx for v_idx, prov_skills in enumerate(vehicle_skills)
+            if req_skills.issubset(prov_skills)
+        ]
         if allowed_vehicles:
             routing.SetAllowedVehiclesForIndex(allowed_vehicles, manager.NodeToIndex(node_idx))
         else:
-            # Penaliza si no se visita (disyunción)
-            routing.AddDisjunction([manager.NodeToIndex(node_idx)], penalty)
+            # Penaliza si no hay ningún vehículo que pueda cubrir los skills
+            routing.AddDisjunction([manager.NodeToIndex(node_idx)], penalty=penalty)
 
 # Penalización de ventanas de tiempo (opcional, aquí solo hook)
 def apply_time_window_penalty(routing, manager, time_dimension, penalty=100_000):

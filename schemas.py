@@ -90,4 +90,6 @@ class RouteDetail(BaseModel):
 class VRPAdvancedResponse(BaseModel):
     solution: dict  # Rutas, distancias, detalles, arrival_times, polylines...
     metadata: dict  # Info adicional (ej: tiempo de cómputo)
-    warnings: Optional[List[str]] = None
+    warnings: Optional[List[dict]] = None
+    excluded_clients: Optional[list] = None
+    diagnostics: Optional[dict] = None

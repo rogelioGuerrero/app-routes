@@ -21,7 +21,7 @@ def optimize_route_google(
     destination: str,
     waypoints: List[str],
     api_key: Optional[str] = None,
-    optimize_waypoints: bool = True
+    optimize_waypoints: bool = False
 ) -> dict:
     """
     origin: dirección o "lat,lon"
