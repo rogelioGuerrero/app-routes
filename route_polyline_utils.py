@@ -44,7 +44,7 @@ def get_route_polyline_and_geojson(latlons, api_key=None, rdp_tolerance=0.0001):
     # Aplica RDP si está disponible
     if rdp is not None and len(points) > 2:
         try:
-            arr = np.array(points)
+            arr = np.array(points, dtype=float)
             points_rdp = rdp(arr, epsilon=rdp_tolerance)
             points = [tuple(pt) for pt in points_rdp]
         except Exception:

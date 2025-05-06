@@ -99,6 +99,7 @@ def get_distance_and_time_matrix(request, api_key, warnings):
 
 @router.post("/vrp-v2", response_model=VRPAdvancedResponse)
 async def vrp_v2(request: VRPSkillsRequest):
+    print("[DEBUG] INICIO vrp_v2")
     """
     Nuevo endpoint VRP vitaminado (v2): modularización del filtrado de clientes, base para mejoras futuras.
     """
@@ -116,9 +117,11 @@ async def vrp_v2(request: VRPSkillsRequest):
     for veh in request.vehicles:
         if not hasattr(veh, 'vehicle_uuid') or not getattr(veh, 'vehicle_uuid', None):
             setattr(veh, 'vehicle_uuid', str(uuidlib.uuid4()))
+    print("[DEBUG] UUIDs asignados")
 
     # --- VALIDACIÓN CENTRALIZADA ---
     is_valid, warnings, diagnostics = validate_full_request(request)
+    print(f"[DEBUG] Resultado validación: is_valid={is_valid}, warnings={warnings}, diagnostics={diagnostics}")
     if not is_valid:
         t1 = time.perf_counter()
         metadata = {
@@ -137,6 +140,8 @@ async def vrp_v2(request: VRPSkillsRequest):
     # --- FILTRO PREVIO DE CLIENTES INVIABLES (skills y capacidades) ---
     depot_index = request.depot if hasattr(request, 'depot') else 0
     viable_locations, excluded_clients = filter_viable_clients(request.locations, request.vehicles, depot_index)
+    print(f"[DEBUG] len(viable_locations): {len(viable_locations)}, type: {[type(x) for x in viable_locations]}")
+    print(f"[DEBUG] len(excluded_clients): {len(excluded_clients)}, type: {[type(x) for x in excluded_clients]}")
     if len(viable_locations) <= 1:
         warn_no_viable_clients(warnings, excluded_clients)
         t1 = time.perf_counter()
@@ -153,7 +158,35 @@ async def vrp_v2(request: VRPSkillsRequest):
     request.locations = viable_locations
 
     # --- MATRIZ DE DISTANCIAS ---
+    print("[DEBUG] Antes de get_distance_and_time_matrix")
     distance_matrix, time_matrix = get_distance_and_time_matrix(request, api_key, warnings)
+    print("[DEBUG] Matrices obtenidas")
+    print(f"[ASSERT] distance_matrix: {distance_matrix}")
+    print(f"[ASSERT] time_matrix: {time_matrix}")
+    if distance_matrix is None or time_matrix is None:
+        raise HTTPException(status_code=500, detail="Error crítico: Las matrices de distancia o tiempo son None. Verifica la API KEY o el fallback.")
+    if len(distance_matrix) == 0 or len(distance_matrix[0]) == 0:
+        raise HTTPException(status_code=500, detail="Error crítico: La matriz de distancias está vacía.")
+    if len(time_matrix) == 0 or len(time_matrix[0]) == 0:
+        raise HTTPException(status_code=500, detail="Error crítico: La matriz de tiempos está vacía.")
+
+    # LOG de depuración previo al solver
+    print("\n--- DEPURACIÓN VRP_V2 ---")
+    print(f"LOCATIONS: {[l.model_dump() if hasattr(l, 'model_dump') else l for l in request.locations]}")
+    print(f"VEHICLES: {[v.model_dump() if hasattr(v, 'model_dump') else v for v in request.vehicles]}")
+    print(f"distance_matrix (type {type(distance_matrix)}): {distance_matrix}")
+    print(f"time_matrix (type {type(time_matrix)}): {time_matrix}")
+    print(f"num_vehicles: {request.num_vehicles}")
+    print(f"depot: {request.depot}")
+    print(f"len(locations): {len(request.locations)}")
+    print(f"len(vehicles): {len(request.vehicles)}")
+    print(f"distance_matrix shape: {len(distance_matrix)}x{len(distance_matrix[0]) if distance_matrix else 0}")
+    print(f"time_matrix shape: {len(time_matrix)}x{len(time_matrix[0]) if time_matrix else 0}")
+    print("--- FIN DEPURACIÓN ---\n")
+    # Print matrices just before solver
+    print(f"[DEBUG] Antes de RoutingIndexManager: distance_matrix={distance_matrix}")
+    print(f"[DEBUG] Antes de RoutingIndexManager: time_matrix={time_matrix}")
+    print(f"[DEBUG] Antes de RoutingIndexManager: num_vehicles={request.num_vehicles}, depot={request.depot}, len(locations)={len(request.locations)}")
 
     # --- RESPUESTA SOLO MATRICES SI detail_level=minimal ---
     if getattr(request, 'detail_level', 'full') == 'minimal':
@@ -167,8 +200,44 @@ async def vrp_v2(request: VRPSkillsRequest):
             warnings=warnings if warnings else None
         )
 
+    # --- LIMPIEZA DE DATOS PARA EL SOLVER ---
+    def clean_location(loc):
+        return {
+            'id': loc.id,
+            'name': getattr(loc, 'name', None),
+            'lat': loc.lat,
+            'lon': loc.lon,
+            'demand': getattr(loc, 'demand', 0),
+            'weight': getattr(loc, 'weight', 0.0),
+            'volume': getattr(loc, 'volume', 0.0),
+            'time_window': getattr(loc, 'time_window', [0, 1440]),
+            'service_time': getattr(loc, 'service_time', 0),
+            'required_skills': getattr(loc, 'required_skills', [])
+        }
+    def clean_vehicle(veh):
+        return {
+            'id': veh.id,
+            'start_lat': veh.start_lat,
+            'start_lon': veh.start_lon,
+            'end_lat': getattr(veh, 'end_lat', veh.start_lat),
+            'end_lon': getattr(veh, 'end_lon', veh.start_lon),
+            'provided_skills': getattr(veh, 'provided_skills', []),
+            'capacity_weight': getattr(veh, 'capacity_weight', 0.0),
+            'capacity_volume': getattr(veh, 'capacity_volume', 0.0),
+            'capacity_quantity': getattr(veh, 'capacity_quantity', 0),
+            'start_time': getattr(veh, 'start_time', 0),
+            'end_time': getattr(veh, 'end_time', 1440),
+            'use_quantity': getattr(veh, 'use_quantity', False),
+            'use_weight': getattr(veh, 'use_weight', False),
+            'use_volume': getattr(veh, 'use_volume', False)
+        }
+    clean_locations = [clean_location(loc) for loc in request.locations]
+    clean_vehicles = [clean_vehicle(veh) for veh in request.vehicles]
+    print(f"[DEBUG] clean_locations: {clean_locations}")
+    print(f"[DEBUG] clean_vehicles: {clean_vehicles}")
+
     # --- SOLVER VRP ---
-    n = len(request.locations)
+    n = len(clean_locations)
     manager = pywrapcp.RoutingIndexManager(n, request.num_vehicles, request.depot)
     routing = pywrapcp.RoutingModel(manager)
     def distance_callback(from_index, to_index):
@@ -178,12 +247,11 @@ async def vrp_v2(request: VRPSkillsRequest):
     transit_callback_index = routing.RegisterTransitCallback(distance_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
-    # --- GUARDAR NÚMERO DE PLACA EN VEHÍCULOS ---
-    # Ya está incluido en el modelo y será usado en build_vrp_solution
+    # --- DIMENSIONES DE CAPACIDAD AVANZADAS (mejora) ---
+    from vrp_utils import add_capacity_dimensions
+    add_capacity_dimensions(routing, manager, request)
 
     # --- SKILLS: RESTRICCIÓN ESTRICTA O PENALIZACIÓN (configurable) ---
-    # Nuevo parámetro: skills_penalty_mode = 'strict' (default) o 'penalty'
-    # --- Definir skills de vehículos y ubicaciones ---
     vehicle_skills = [set(getattr(v, 'provided_skills', []) or set(getattr(v, 'skills', []) or [])) for v in request.vehicles]
     location_skills = [set(getattr(l, 'required_skills', []) or set(getattr(l, 'skills', []) or [])) for l in request.locations]
 
@@ -199,10 +267,6 @@ async def vrp_v2(request: VRPSkillsRequest):
                 if not req_skills.issubset(prov_skills):
                     routing.VehicleVar(manager.NodeToIndex(node_idx)).RemoveValue(vehicle_idx)
 
-    # --- DIMENSIONES DE CAPACIDAD AVANZADAS (mejora) ---
-    from vrp_utils import add_capacity_dimensions
-    add_capacity_dimensions(routing, manager, request)
-
     # --- TIME WINDOWS Y SERVICE TIME ---
     time_windows = []
     service_times = []
@@ -211,20 +275,7 @@ async def vrp_v2(request: VRPSkillsRequest):
         time_windows.append(tw)
         service_times.append(getattr(loc, 'service_time', 5) if idx != request.depot else 0)
 
-    # --- SOLUCIÓN Y RESPUESTA FINAL ---
-    from vrp_utils import build_vrp_solution
-    solution = routing.SolveWithParameters(pywrapcp.DefaultRoutingSearchParameters())
-    t1 = time.perf_counter()
-    vrp_solution = build_vrp_solution(solution, routing, manager, request, None, time_windows, service_times, distance_matrix, time_matrix)
-    metadata = {"computation_time_ms": int((t1-t0)*1000)}
-    # Incluye locations en la respuesta
-    locations_out = [loc.dict() if hasattr(loc, 'dict') else dict(loc) for loc in request.locations]
-    return {
-        "solution": vrp_solution,
-        "metadata": metadata,
-        "warnings": warnings if warnings else None,
-        "locations": locations_out
-    }
+    # --- DIMENSIÓN DE TIEMPO (AddDimension) ---
     def time_callback(from_index, to_index):
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
@@ -238,7 +289,6 @@ async def vrp_v2(request: VRPSkillsRequest):
         'Time')
     time_dimension = routing.GetDimensionOrDie('Time')
     time_dimension.SetSlackCostCoefficientForAllVehicles(100)
-    # --- Ajuste dinámico de la ventana del depósito (mejora real) ---
     adjust_depot_window = getattr(request, 'adjust_depot_window', False)
     for vehicle_id, vehicle in enumerate(request.vehicles):
         depot_index = routing.Start(vehicle_id)

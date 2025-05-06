@@ -5,6 +5,7 @@
 *.geojson
 *.json  
 *.txt
+!requirements.txt
 
 # Ignorar entorno virtual de Python
 venv/
