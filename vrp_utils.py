@@ -335,6 +335,22 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
         service_starts.append(arrival)
         service_ends.append(arrival)
         # Construir stops detallados
+        # Agregar el depósito como primer stop
+        depot_node = route[0]
+        depot_stop = {
+            "stop_index": 0,
+            "location_id": depot_node,
+            "client_uuid": getattr(locations[depot_node], 'client_uuid', None),
+            "arrival_time": times[0],
+            "arrival_time_hhmm": min_to_hhmm(times[0]),
+            "wait_time": 0,
+            "service_time": service_times[depot_node],
+            "service_start": service_starts[0],
+            "service_start_hhmm": min_to_hhmm(service_starts[0]),
+            "service_end": service_ends[0],
+            "service_end_hhmm": min_to_hhmm(service_ends[0])
+        }
+        stops = [depot_stop]
         for stop_idx, node in enumerate(route[1:], 1):
             # Cálculo correcto del tiempo de espera: solo si el vehículo llega antes de la ventana de servicio
             ventana_inicio = time_windows[node][0]
