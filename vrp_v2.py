@@ -26,76 +26,169 @@ router = APIRouter()
 def get_distance_and_time_matrix(request, api_key, warnings):
     """
     Obtiene la matriz de distancias y tiempos usando Google Distance Matrix API o fallback euclidiano.
-    Maneja errores específicos y logging.
+    Maneja errores específicos y logging. Soporta chunking si hay más de 10 ubicaciones.
     """
-    origins = [f"{loc.lat},{loc.lon}" for loc in request.locations]
-    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-    params = {
-        "origins": "|".join(origins),
-        "destinations": "|".join(origins),
-        "mode": getattr(request, 'mode', 'driving') or 'driving',
-        "units": getattr(request, 'units', 'metric') or 'metric',
-        "key": api_key
-    }
-    try:
-        response = requests.get(url, params=params, timeout=30)
-        if response.status_code != 200:
-            logger.error(f"Error HTTP consultando Google Distance Matrix: {response.status_code} {response.text}")
-            raise Exception(f"Error consultando Google Distance Matrix: {response.text}")
-        data = response.json()
-        status = data.get("status")
-        if status != "OK":
-            logger.warning(f"Respuesta inválida de Google Distance Matrix: {data}")
-            if status == "OVER_QUERY_LIMIT":
-                raise HTTPException(status_code=429, detail="Límite de cuota de Google alcanzado")
-            elif status == "INVALID_REQUEST":
-                raise HTTPException(status_code=400, detail="Solicitud inválida a Google Distance Matrix")
-            elif status == "REQUEST_DENIED":
-                raise HTTPException(status_code=403, detail="Acceso denegado a Google Distance Matrix")
-            else:
-                raise Exception(f"Respuesta inválida de Google Distance Matrix: {data}")
-        n = len(request.locations)
-        distance_matrix = []
-        time_matrix = []
-        for row in data["rows"]:
-            distance_row = [el["distance"]["value"]/1000 if el.get("distance") else 1e6 for el in row["elements"]]
-            time_row = [el["duration"]["value"]//60 if el.get("duration") else 1e6 for el in row["elements"]]
-            distance_matrix.append(distance_row)
-            time_matrix.append(time_row)
-        return distance_matrix, time_matrix
-    except HTTPException as he:
-        logger.warning(f"HTTPException en consulta de matriz: {he.detail}")
-        raise
-    except Exception as e:
-        logger.warning(f"Fallo la API de Google o error inesperado, se usa fallback euclidiano: {e}")
-        warn_matrix_fallback(warnings, str(e))
-        n = len(request.locations)
-        distance_matrix = []
-        time_matrix = []
-        for i in range(n):
-            d_row = []
-            t_row = []
-            for j in range(n):
-                if i == j:
-                    d_row.append(0)
-                    t_row.append(0)
+    from vrp_utils import add_warning
+    import math
+    locations = request.locations
+    n = len(locations)
+    MAX_CHUNK = 10
+    if n <= MAX_CHUNK:
+        # --- Comportamiento original ---
+        origins = [f"{loc.lat},{loc.lon}" for loc in locations]
+        url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+        params = {
+            "origins": "|".join(origins),
+            "destinations": "|".join(origins),
+            "mode": getattr(request, 'mode', 'driving') or 'driving',
+            "units": getattr(request, 'units', 'metric') or 'metric',
+            "key": api_key
+        }
+        try:
+            response = requests.get(url, params=params, timeout=30)
+            if response.status_code != 200:
+                logger.error(f"Error HTTP consultando Google Distance Matrix: {response.status_code} {response.text}")
+                raise Exception(f"Error consultando Google Distance Matrix: {response.text}")
+            data = response.json()
+            status = data.get("status")
+            if status != "OK":
+                logger.warning(f"Respuesta inválida de Google Distance Matrix: {data}")
+                if status == "OVER_QUERY_LIMIT":
+                    raise HTTPException(status_code=429, detail="Límite de cuota de Google alcanzado")
+                elif status == "INVALID_REQUEST":
+                    raise HTTPException(status_code=400, detail="Solicitud inválida a Google Distance Matrix")
+                elif status == "REQUEST_DENIED":
+                    raise HTTPException(status_code=403, detail="Acceso denegado a Google Distance Matrix")
                 else:
-                    lat1, lon1 = request.locations[i].lat, request.locations[i].lon
-                    lat2, lon2 = request.locations[j].lat, request.locations[j].lon
-                    dist = ((lat1-lat2)**2 + (lon1-lon2)**2)**0.5 * 111  # Aprox km
-                    d_row.append(dist)
-                    t_row.append(int(dist/DEFAULT_SPEED_KMH*60))  # velocidad configurable
-            distance_matrix.append(d_row)
-            time_matrix.append(t_row)
-        # --- Ajuste de congestión por horas pico ---
-        peak_hours = getattr(request, 'peak_hours', None)  # Ejemplo: [450, 570] para 07:30 a 09:30
-        peak_multiplier = getattr(request, 'peak_multiplier', 1.3)  # 30% más lento
-        if peak_hours:
+                    raise Exception(f"Respuesta inválida de Google Distance Matrix: {data}")
+            distance_matrix = []
+            time_matrix = []
+            for row in data["rows"]:
+                distance_row = [el["distance"]["value"]/1000 if el.get("distance") else 1e6 for el in row["elements"]]
+                time_row = [el["duration"]["value"]//60 if el.get("duration") else 1e6 for el in row["elements"]]
+                distance_matrix.append(distance_row)
+                time_matrix.append(time_row)
+            return distance_matrix, time_matrix
+        except HTTPException as he:
+            logger.warning(f"HTTPException en consulta de matriz: {he.detail}")
+            raise
+        except Exception as e:
+            logger.warning(f"Fallo la API de Google o error inesperado, se usa fallback euclidiano: {e}")
+            warn_matrix_fallback(warnings, str(e))
+            n = len(locations)
+            distance_matrix = []
+            time_matrix = []
+            for i in range(n):
+                d_row = []
+                t_row = []
+                for j in range(n):
+                    if i == j:
+                        d_row.append(0)
+                        t_row.append(0)
+                    else:
+                        lat1, lon1 = locations[i].lat, locations[i].lon
+                        lat2, lon2 = locations[j].lat, locations[j].lon
+                        dist = ((lat1-lat2)**2 + (lon1-lon2)**2)**0.5 * 111  # Aprox km
+                        d_row.append(dist)
+                        t_row.append(int(dist/DEFAULT_SPEED_KMH*60))  # velocidad configurable
+                distance_matrix.append(d_row)
+                time_matrix.append(t_row)
+            # --- Ajuste de congestión por horas pico ---
+            peak_hours = getattr(request, 'peak_hours', None)
+            peak_multiplier = getattr(request, 'peak_multiplier', 1.3)
+            if peak_hours:
+                for i in range(n):
+                    for j in range(n):
+                        time_matrix[i][j] = int(time_matrix[i][j] * peak_multiplier)
+            return distance_matrix, time_matrix
+    else:
+        # --- Chunking ---
+        add_warning(warnings, "CHUNKING_USED", "Se utilizó chunking para cumplir el límite de la API de Google Distance Matrix.")
+        origins_list = [f"{loc.lat},{loc.lon}" for loc in locations]
+        distance_matrix = [[None for _ in range(n)] for _ in range(n)]
+        time_matrix = [[None for _ in range(n)] for _ in range(n)]
+        num_chunks = math.ceil(n / MAX_CHUNK)
+        try:
+            for i in range(num_chunks):
+                orig_start = i * MAX_CHUNK
+                orig_end = min((i+1)*MAX_CHUNK, n)
+                chunk_origins = origins_list[orig_start:orig_end]
+                for j in range(num_chunks):
+                    dest_start = j * MAX_CHUNK
+                    dest_end = min((j+1)*MAX_CHUNK, n)
+                    chunk_destinations = origins_list[dest_start:dest_end]
+                    url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+                    params = {
+                        "origins": "|".join(chunk_origins),
+                        "destinations": "|".join(chunk_destinations),
+                        "mode": getattr(request, 'mode', 'driving') or 'driving',
+                        "units": getattr(request, 'units', 'metric') or 'metric',
+                        "key": api_key
+                    }
+                    response = requests.get(url, params=params, timeout=30)
+                    if response.status_code != 200:
+                        logger.error(f"Error HTTP consultando Google Distance Matrix: {response.status_code} {response.text}")
+                        raise Exception(f"Error consultando Google Distance Matrix: {response.text}")
+                    data = response.json()
+                    status = data.get("status")
+                    if status != "OK":
+                        logger.warning(f"Respuesta inválida de Google Distance Matrix: {data}")
+                        if status == "OVER_QUERY_LIMIT":
+                            raise HTTPException(status_code=429, detail="Límite de cuota de Google alcanzado")
+                        elif status == "INVALID_REQUEST":
+                            raise HTTPException(status_code=400, detail="Solicitud inválida a Google Distance Matrix")
+                        elif status == "REQUEST_DENIED":
+                            raise HTTPException(status_code=403, detail="Acceso denegado a Google Distance Matrix")
+                        else:
+                            raise Exception(f"Respuesta inválida de Google Distance Matrix: {data}")
+                    # Llenar la submatriz en la matriz final
+                    for oi, row in enumerate(data["rows"]):
+                        for di, el in enumerate(row["elements"]):
+                            global_i = orig_start + oi
+                            global_j = dest_start + di
+                            if global_i < n and global_j < n:
+                                distance_matrix[global_i][global_j] = el["distance"]["value"]/1000 if el.get("distance") else 1e6
+                                time_matrix[global_i][global_j] = el["duration"]["value"]//60 if el.get("duration") else 1e6
+            # Reemplaza None por 1e6 si alguna celda quedó vacía
             for i in range(n):
                 for j in range(n):
-                    # Solución sencilla: aplica a toda la matriz
-                    time_matrix[i][j] = int(time_matrix[i][j] * peak_multiplier)
-        return distance_matrix, time_matrix
+                    if distance_matrix[i][j] is None:
+                        distance_matrix[i][j] = 1e6
+                    if time_matrix[i][j] is None:
+                        time_matrix[i][j] = 1e6
+            return distance_matrix, time_matrix
+        except HTTPException as he:
+            logger.warning(f"HTTPException en consulta de matriz: {he.detail}")
+            raise
+        except Exception as e:
+            logger.warning(f"Fallo la API de Google o error inesperado durante chunking, se usa fallback euclidiano: {e}")
+            warn_matrix_fallback(warnings, str(e))
+            distance_matrix = []
+            time_matrix = []
+            for i in range(n):
+                d_row = []
+                t_row = []
+                for j in range(n):
+                    if i == j:
+                        d_row.append(0)
+                        t_row.append(0)
+                    else:
+                        lat1, lon1 = locations[i].lat, locations[i].lon
+                        lat2, lon2 = locations[j].lat, locations[j].lon
+                        dist = ((lat1-lat2)**2 + (lon1-lon2)**2)**0.5 * 111  # Aprox km
+                        d_row.append(dist)
+                        t_row.append(int(dist/DEFAULT_SPEED_KMH*60))
+                distance_matrix.append(d_row)
+                time_matrix.append(t_row)
+            # --- Ajuste de congestión por horas pico ---
+            peak_hours = getattr(request, 'peak_hours', None)
+            peak_multiplier = getattr(request, 'peak_multiplier', 1.3)
+            if peak_hours:
+                for i in range(n):
+                    for j in range(n):
+                        time_matrix[i][j] = int(time_matrix[i][j] * peak_multiplier)
+            return distance_matrix, time_matrix
+
 
 @router.post("/vrp-v2", response_model=VRPAdvancedResponse)
 async def vrp_v2(request: VRPSkillsRequest):
