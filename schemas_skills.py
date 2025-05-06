@@ -13,6 +13,7 @@ class SkillsVehicle(BaseModel):
     Modelo de vehículo para VRP con validación estricta.
     """
     id: int
+    vehicle_uuid: Optional[str] = None
     start_lat: float
     start_lon: float
     end_lat: Optional[float] = None
@@ -33,6 +34,7 @@ class SkillsLocation(BaseModel):
     Modelo de ubicación/cliente para VRP con validación estricta y valores por defecto.
     """
     id: int
+    client_uuid: Optional[str] = None
     name: Optional[str] = None
     lat: float
     lon: float
