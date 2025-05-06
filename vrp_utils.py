@@ -287,7 +287,7 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             "routes": [],
             "total_distance": 0,
             "route_polylines": [],
-            "route_points": [],
+
             "details": []
         }
     num_vehicles = request.num_vehicles
@@ -411,11 +411,32 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             "capacity_quantity": getattr(request.vehicles[vehicle_id], 'capacity_quantity', None),
             "stops": stops
         })
+    # --- Nueva estructura: client_points ---
+    client_points = []
+    for idx, loc in enumerate(locations):
+        client_dict = {
+            "client_uuid": getattr(loc, 'client_uuid', None),
+            "location_id": idx,
+            "lat": float(getattr(loc, 'lat', 0)),
+            "lon": float(getattr(loc, 'lon', 0)),
+        }
+        if hasattr(loc, 'name') and getattr(loc, 'name', None):
+            client_dict["name"] = getattr(loc, 'name')
+        if hasattr(loc, 'required_skills') and getattr(loc, 'required_skills', None):
+            client_dict["required_skills"] = getattr(loc, 'required_skills')
+        if hasattr(loc, 'demand') and getattr(loc, 'demand', None):
+            client_dict["demand"] = getattr(loc, 'demand')
+        # Ventana horaria
+        if time_windows and idx < len(time_windows):
+            tw = time_windows[idx]
+            client_dict["time_window"] = list(tw)
+            client_dict["time_window_hhmm"] = [min_to_hhmm(tw[0]), min_to_hhmm(tw[1])]
+        client_points.append(client_dict)
     return {
         "routes": routes,
         "total_distance": round(total_distance, 2),
         "route_polylines": route_polylines,
-        "route_points": route_points,
+        "client_points": client_points,
         "details": details
     }
 
