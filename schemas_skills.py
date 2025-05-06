@@ -26,6 +26,7 @@ class SkillsVehicle(BaseModel):
     use_quantity: Optional[bool] = False
     use_weight: Optional[bool] = False
     use_volume: Optional[bool] = False
+    plate_number: Optional[str] = None  # Número de placa del vehículo
 
 class SkillsLocation(BaseModel):
     """

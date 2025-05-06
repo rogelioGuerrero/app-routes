@@ -343,6 +343,7 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             stop = {
                 "stop_index": stop_idx,
                 "location_id": node,
+                "client_uuid": getattr(locations[node], 'client_uuid', None),
                 "arrival_time": arrival,
                 "arrival_time_hhmm": min_to_hhmm(arrival),
                 "wait_time": wait_time,
@@ -356,6 +357,8 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
         # Rutas y detalles
         routes.append({
             "vehicle_id": vehicle_id,
+            "vehicle_uuid": getattr(request.vehicles[vehicle_id], 'vehicle_uuid', None),
+            "plate_number": getattr(request.vehicles[vehicle_id], 'plate_number', None),
             "route": route,
             "route_distance": round(route_distance, 2)
         })
@@ -370,6 +373,8 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
         route_points.append([[float(locations[nodo].lat), float(locations[nodo].lon)] for nodo in route])
         details.append({
             "vehicle_id": vehicle_id,
+            "vehicle_uuid": getattr(request.vehicles[vehicle_id], 'vehicle_uuid', None),
+            "plate_number": getattr(request.vehicles[vehicle_id], 'plate_number', None),
             "stops": stops
         })
     return {

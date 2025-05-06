@@ -102,11 +102,20 @@ async def vrp_v2(request: VRPSkillsRequest):
     """
     Nuevo endpoint VRP vitaminado (v2): modularización del filtrado de clientes, base para mejoras futuras.
     """
+    import uuid as uuidlib
     t0 = time.perf_counter()
     load_dotenv()
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         raise HTTPException(status_code=400, detail="GOOGLE_API_KEY no encontrada en .env")
+
+    # --- GENERA vehicle_uuid PARA CADA VEHÍCULO Y client_uuid PARA CADA CLIENTE SI NO LO TIENEN ---
+    for loc in request.locations:
+        if not hasattr(loc, 'client_uuid') or not getattr(loc, 'client_uuid', None):
+            setattr(loc, 'client_uuid', str(uuidlib.uuid4()))
+    for veh in request.vehicles:
+        if not hasattr(veh, 'vehicle_uuid') or not getattr(veh, 'vehicle_uuid', None):
+            setattr(veh, 'vehicle_uuid', str(uuidlib.uuid4()))
 
     # --- VALIDACIÓN CENTRALIZADA ---
     is_valid, warnings, diagnostics = validate_full_request(request)
@@ -169,6 +178,9 @@ async def vrp_v2(request: VRPSkillsRequest):
     transit_callback_index = routing.RegisterTransitCallback(distance_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
+    # --- GUARDAR NÚMERO DE PLACA EN VEHÍCULOS ---
+    # Ya está incluido en el modelo y será usado en build_vrp_solution
+
     # --- SKILLS: RESTRICCIÓN ESTRICTA O PENALIZACIÓN (configurable) ---
     # Nuevo parámetro: skills_penalty_mode = 'strict' (default) o 'penalty'
     # --- Definir skills de vehículos y ubicaciones ---
@@ -198,6 +210,21 @@ async def vrp_v2(request: VRPSkillsRequest):
         tw = loc.time_window if loc.time_window and len(loc.time_window) == 2 else [420, 1080]
         time_windows.append(tw)
         service_times.append(getattr(loc, 'service_time', 5) if idx != request.depot else 0)
+
+    # --- SOLUCIÓN Y RESPUESTA FINAL ---
+    from vrp_utils import build_vrp_solution
+    solution = routing.SolveWithParameters(pywrapcp.DefaultRoutingSearchParameters())
+    t1 = time.perf_counter()
+    vrp_solution = build_vrp_solution(solution, routing, manager, request, None, time_windows, service_times, distance_matrix, time_matrix)
+    metadata = {"computation_time_ms": int((t1-t0)*1000)}
+    # Incluye locations en la respuesta
+    locations_out = [loc.dict() if hasattr(loc, 'dict') else dict(loc) for loc in request.locations]
+    return {
+        "solution": vrp_solution,
+        "metadata": metadata,
+        "warnings": warnings if warnings else None,
+        "locations": locations_out
+    }
     def time_callback(from_index, to_index):
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)

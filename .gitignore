@@ -4,6 +4,7 @@
 *.html
 *.geojson
 *.json  
+*.txt
 
 # Ignorar entorno virtual de Python
 venv/
