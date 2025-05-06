@@ -371,6 +371,10 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             }
             stops.append(stop)
         # Rutas y detalles
+        # Tiempos efectivos del vehículo
+        start_time = service_ends[0]  # Hora de salida del depósito
+        end_time = service_ends[-1]   # Hora de regreso al depósito
+        route_travel_time = end_time - start_time
         routes.append({
             "vehicle_id": vehicle_id,
             "vehicle_uuid": getattr(request.vehicles[vehicle_id], 'vehicle_uuid', None),
@@ -380,7 +384,13 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             "capacity_volume": getattr(request.vehicles[vehicle_id], 'capacity_volume', None),
             "capacity_quantity": getattr(request.vehicles[vehicle_id], 'capacity_quantity', None),
             "route": route,
-            "route_distance": round(route_distance, 2)
+            "route_distance": round(route_distance, 2),
+            "start_time": start_time,
+            "start_time_hhmm": min_to_hhmm(start_time),
+            "end_time": end_time,
+            "end_time_hhmm": min_to_hhmm(end_time),
+            "route_travel_time": route_travel_time,
+            "route_travel_time_hhmm": f"{route_travel_time//60:02}:{route_travel_time%60:02}"
         })
         total_distance += route_distance
         # Polyline y puntos
