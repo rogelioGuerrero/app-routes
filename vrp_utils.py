@@ -359,6 +359,10 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             "vehicle_id": vehicle_id,
             "vehicle_uuid": getattr(request.vehicles[vehicle_id], 'vehicle_uuid', None),
             "plate_number": getattr(request.vehicles[vehicle_id], 'plate_number', None),
+            "provided_skills": getattr(request.vehicles[vehicle_id], 'provided_skills', []),
+            "capacity_weight": getattr(request.vehicles[vehicle_id], 'capacity_weight', None),
+            "capacity_volume": getattr(request.vehicles[vehicle_id], 'capacity_volume', None),
+            "capacity_quantity": getattr(request.vehicles[vehicle_id], 'capacity_quantity', None),
             "route": route,
             "route_distance": round(route_distance, 2)
         })
@@ -375,6 +379,10 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             "vehicle_id": vehicle_id,
             "vehicle_uuid": getattr(request.vehicles[vehicle_id], 'vehicle_uuid', None),
             "plate_number": getattr(request.vehicles[vehicle_id], 'plate_number', None),
+            "provided_skills": getattr(request.vehicles[vehicle_id], 'provided_skills', []),
+            "capacity_weight": getattr(request.vehicles[vehicle_id], 'capacity_weight', None),
+            "capacity_volume": getattr(request.vehicles[vehicle_id], 'capacity_volume', None),
+            "capacity_quantity": getattr(request.vehicles[vehicle_id], 'capacity_quantity', None),
             "stops": stops
         })
     return {
