@@ -356,6 +356,11 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             ventana_inicio = time_windows[node][0]
             arrival = times[stop_idx]
             wait_time = max(0, ventana_inicio - arrival) if arrival < ventana_inicio else 0
+            # Calcular campos de trayecto desde el stop anterior
+            prev_node = route[stop_idx - 1] if stop_idx > 0 else None
+            prev_service_end = service_ends[stop_idx - 1] if stop_idx > 0 else None
+            travel_time_from_prev = arrival - prev_service_end if prev_service_end is not None else None
+            distance_from_prev = distance_matrix[prev_node][node] if prev_node is not None else None
             stop = {
                 "stop_index": stop_idx,
                 "location_id": node,
@@ -367,7 +372,19 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
                 "service_start": service_starts[stop_idx],
                 "service_start_hhmm": min_to_hhmm(service_starts[stop_idx]),
                 "service_end": service_ends[stop_idx],
-                "service_end_hhmm": min_to_hhmm(service_ends[stop_idx])
+                "service_end_hhmm": min_to_hhmm(service_ends[stop_idx]),
+                # Enriquecimiento con datos estáticos del cliente
+                "lat": float(getattr(locations[node], 'lat', 0)),
+                "lon": float(getattr(locations[node], 'lon', 0)),
+                **({"name": getattr(locations[node], 'name')} if hasattr(locations[node], 'name') and getattr(locations[node], 'name', None) else {}),
+                **({"required_skills": getattr(locations[node], 'required_skills')} if hasattr(locations[node], 'required_skills') and getattr(locations[node], 'required_skills', None) else {}),
+                **({"demand": getattr(locations[node], 'demand')} if hasattr(locations[node], 'demand') and getattr(locations[node], 'demand', None) else {}),
+                # Agregar time_window si existe
+                **({"time_window": list(time_windows[node]), "time_window_hhmm": [min_to_hhmm(time_windows[node][0]), min_to_hhmm(time_windows[node][1])]} if time_windows and node < len(time_windows) else {}),
+                # Campos de trayecto
+                "prev_location_id": prev_node,
+                "travel_time_from_prev": travel_time_from_prev,
+                "distance_from_prev": distance_from_prev
             }
             stops.append(stop)
         # Rutas y detalles
@@ -375,6 +392,14 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
         start_time = service_ends[0]  # Hora de salida del depósito
         end_time = service_ends[-1]   # Hora de regreso al depósito
         route_travel_time = end_time - start_time
+        # Construir route_info enriquecido
+        route_info = []
+        for node in route:
+            route_info.append({
+                "location_id": node,
+                "client_uuid": getattr(locations[node], 'client_uuid', None),
+                **({"name": getattr(locations[node], 'name')} if hasattr(locations[node], 'name') and getattr(locations[node], 'name', None) else {})
+            })
         routes.append({
             "vehicle_id": vehicle_id,
             "vehicle_uuid": getattr(request.vehicles[vehicle_id], 'vehicle_uuid', None),
@@ -384,6 +409,7 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             "capacity_volume": getattr(request.vehicles[vehicle_id], 'capacity_volume', None),
             "capacity_quantity": getattr(request.vehicles[vehicle_id], 'capacity_quantity', None),
             "route": route,
+            "route_info": route_info,
             "route_distance": round(route_distance, 2),
             "start_time": start_time,
             "start_time_hhmm": min_to_hhmm(start_time),
@@ -412,6 +438,15 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             "stops": stops
         })
     # --- Nueva estructura: client_points ---
+    # Construir un mapeo de location_id a orden de visita (order) según rutas
+    location_order = {}
+    order_counter = 1
+    for route_obj in routes:
+        for node in route_obj["route"]:
+            # Solo asignar orden si no se ha asignado antes (para evitar duplicados en rutas múltiples)
+            if node not in location_order:
+                location_order[node] = order_counter
+                order_counter += 1
     client_points = []
     for idx, loc in enumerate(locations):
         client_dict = {
@@ -431,13 +466,30 @@ def build_vrp_solution(solution, routing, manager, request, time_dimension, time
             tw = time_windows[idx]
             client_dict["time_window"] = list(tw)
             client_dict["time_window_hhmm"] = [min_to_hhmm(tw[0]), min_to_hhmm(tw[1])]
+        # Agregar el campo 'order' solo si el punto fue visitado en alguna ruta
+        if idx in location_order:
+            client_dict["order"] = location_order[idx]
         client_points.append(client_dict)
+
+    # Construir estructura timeline_points: todos los stops de todas las rutas, con info de vehículo y ordenados por service_start
+    timeline_points = []
+    for route_obj in routes:
+        vehicle_id = route_obj["vehicle_id"]
+        vehicle_uuid = route_obj.get("vehicle_uuid")
+        stops = next((d["stops"] for d in details if d["vehicle_id"] == vehicle_id), [])
+        for stop in stops:
+            timeline_points.append({
+                "vehicle_id": vehicle_id,
+                "vehicle_uuid": vehicle_uuid,
+                **stop
+            })
+    timeline_points.sort(key=lambda s: s["service_start"])
     return {
         "routes": routes,
         "total_distance": round(total_distance, 2),
         "route_polylines": route_polylines,
-        "client_points": client_points,
-        "details": details
+        "details": details,
+        "timeline_points": timeline_points
     }
 
 
