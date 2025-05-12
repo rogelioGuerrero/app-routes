@@ -264,22 +264,7 @@ async def vrp_v2(request: VRPSkillsRequest):
         raise HTTPException(status_code=500, detail="Error crítico: La matriz de tiempos está vacía.")
 
     # LOG de depuración previo al solver
-    print("\n--- DEPURACIÓN VRP_V2 ---")
-    print(f"LOCATIONS: {[l.model_dump() if hasattr(l, 'model_dump') else l for l in request.locations]}")
-    print(f"VEHICLES: {[v.model_dump() if hasattr(v, 'model_dump') else v for v in request.vehicles]}")
-    print(f"distance_matrix (type {type(distance_matrix)}): {distance_matrix}")
-    print(f"time_matrix (type {type(time_matrix)}): {time_matrix}")
-    print(f"num_vehicles: {request.num_vehicles}")
-    print(f"depot: {request.depot}")
-    print(f"len(locations): {len(request.locations)}")
-    print(f"len(vehicles): {len(request.vehicles)}")
-    print(f"distance_matrix shape: {len(distance_matrix)}x{len(distance_matrix[0]) if distance_matrix else 0}")
-    print(f"time_matrix shape: {len(time_matrix)}x{len(time_matrix[0]) if time_matrix else 0}")
-    print("--- FIN DEPURACIÓN ---\n")
-    # Print matrices just before solver
-    print(f"[DEBUG] Antes de RoutingIndexManager: distance_matrix={distance_matrix}")
-    print(f"[DEBUG] Antes de RoutingIndexManager: time_matrix={time_matrix}")
-    print(f"[DEBUG] Antes de RoutingIndexManager: num_vehicles={request.num_vehicles}, depot={request.depot}, len(locations)={len(request.locations)}")
+
 
     # --- RESPUESTA SOLO MATRICES SI detail_level=minimal ---
     if getattr(request, 'detail_level', 'full') == 'minimal':
