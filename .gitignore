@@ -1,0 +1,59 @@
+.qodo
+# Ignorar archivos markdown
+*.md
+*.html
+*.geojson
+*.json  
+*.txt
+!requirements.txt
+
+# Ignorar entorno virtual de Python
+venv/
+.env
+__pycache__/
+*.pyc
+
+# Ignorar archivos temporales y de sistema
+.DS_Store
+Thumbs.db
+*.log
+
+# Ignorar archivos de configuración de IDE
+.vscode/
+.idea/
+
+# Test files
+tests/
+tests/*.py
+**/test_*.py
+
+# Archivos de caché de Python
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Archivos de distribución
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Archivos temporales
+*.bak
+*.tmp
+*~
+
+# Archivos de entorno
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Archivos de configuración local
+*.local.yml
+*.local.yaml
+
+# Archivos de base de datos SQLite
+*.sqlite3
+*.sqlite3-*
