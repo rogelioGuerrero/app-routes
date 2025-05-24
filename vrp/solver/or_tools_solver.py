@@ -1,10 +1,15 @@
 import logging
+import sys
+import os
 from typing import List, Dict, Any, Optional, Tuple, Union
 from enum import Enum
 from ortools.constraint_solver import routing_enums_pb2, pywrapcp
 
+# Add root directory to path for absolute imports
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
+
 from .base_solver import BaseVRPSolver, VRPSolution, SolverType
-from ....schemas_skills import OptimizationProfile
+from schemas_skills import OptimizationProfile
 
 logger = logging.getLogger(__name__)
 

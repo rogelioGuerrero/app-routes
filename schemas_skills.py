@@ -5,6 +5,12 @@ from vrp_constants import (
     DEFAULT_SERVICE_TIME, DEFAULT_BUFFER_MINUTES, DEFAULT_PEAK_HOURS, DEFAULT_PEAK_MULTIPLIER,
     DEFAULT_TIME_WINDOW, DEFAULT_UNITS, DEFAULT_MODE
 )
+import sys
+import os
+
+# Asegurarse de que el directorio actual esté en el path
+sys.path.insert(0, os.path.abspath('.'))
+
 from schemas_matrix import MatrixApiConfig
 from enum import Enum
 

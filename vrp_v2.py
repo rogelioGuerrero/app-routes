@@ -4,8 +4,7 @@ from typing import List
 from schemas_skills import VRPSkillsRequest, SkillsLocation, SkillsVehicle
 from route_polyline_utils import get_route_polyline_and_geojson
 from schemas import VRPAdvancedResponse
-from vrp_utils import min_to_hhmm, filter_viable_clients, add_warning, warn_matrix_fallback, warn_no_viable_clients
-from vrp_validator import VRPValidator
+from vrp_utils import min_to_hhmm, filter_viable_clients, add_warning, warn_matrix_fallback, warn_no_viable_clients, validate_full_request
 from vrp_constants import DEFAULT_SPEED_KMH, MAX_TIME_MINUTES, SKILL_PENALTY, DEFAULT_BUFFER_MINUTES
 import os
 import requests
@@ -213,8 +212,8 @@ async def vrp_v2(request: VRPSkillsRequest):
     print("[DEBUG] UUIDs asignados")
 
     # --- VALIDACIÓN CENTRALIZADA ---
-    validator = VRPValidator()
-    is_valid, warnings, diagnostics = validator.validate_v2(request.dict())
+    from vrp_utils import validate_full_request
+    is_valid, warnings, diagnostics = validate_full_request(request)
     print(f"[DEBUG] Resultado validación: is_valid={is_valid}, warnings={warnings}, diagnostics={diagnostics}")
     if not is_valid:
         t1 = time.perf_counter()
@@ -364,7 +363,7 @@ async def vrp_v2(request: VRPSkillsRequest):
     time_windows = []
     service_times = []
     for idx, loc in enumerate(request.locations):
-        tw = loc.time_window if loc.time_window and len(loc.time_window) == 2 else [420, 1080]
+        tw = loc.time_window if loc.time_window else [0, 1440]
         time_windows.append(tw)
         service_times.append(getattr(loc, 'service_time', 5) if idx != request.depot else 0)
 

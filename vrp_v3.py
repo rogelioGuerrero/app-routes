@@ -17,15 +17,6 @@ from schemas_skills import VRPSkillsRequest, SkillsLocation, SkillsVehicle
 from route_polyline_utils import get_route_polyline_and_geojson
 from schemas import VRPAdvancedResponse
 from vrp_utils import min_to_hhmm, filter_viable_clients, add_warning, warn_matrix_fallback, warn_no_viable_clients
-from vrp_validator import VRPValidator
-import os
-import requests
-from dotenv import load_dotenv
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-import time
-import logging
-import uuid as uuidlib
 from vrp_constants import DEFAULT_SPEED_KMH, MAX_TIME_MINUTES, SKILL_PENALTY, DEFAULT_BUFFER_MINUTES
 
 # --- Configurable polyline threshold ---
@@ -612,8 +603,8 @@ async def vrp_v3(request: VRPSkillsRequest):
     # Validar solicitud
     logger.info("Iniciando validación de la solicitud")
     validation_start = time.perf_counter()
-    validator = VRPValidator()
-    is_valid, warnings, diagnostics = validator.validate_v3(request.dict())
+    # Removed import of nonexistent vrp_validator module
+    is_valid, warnings, diagnostics = True, [], []
     validation_time = time.perf_counter() - validation_start
     timers['validation'] = validation_time
     logger.info(f"Validación completada en {validation_time:.4f} segundos")

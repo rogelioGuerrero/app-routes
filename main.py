@@ -9,6 +9,7 @@ from vrp_skills import router as vrp_skills_router
 from vrp_skills_check import router as vrp_skills_check_router
 from vrp_v1 import router as vrp_v1_router
 from vrp_v2 import router as vrp_v2_router
+from vrp_v2_5 import router as vrp_v2_5_router
 from vrp_v3 import router as vrp_v3_router
 
 app = FastAPI(
@@ -35,6 +36,7 @@ app.include_router(vrp_skills_router)
 app.include_router(vrp_skills_check_router)
 app.include_router(vrp_v1_router)
 app.include_router(vrp_v2_router)
+app.include_router(vrp_v2_5_router)
 app.include_router(vrp_v3_router)
 
 @app.get("/")
