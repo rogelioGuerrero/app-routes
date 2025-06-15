@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: vrp-solver-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host=0.0.0.0 --port=$PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.16
+      - key: ORS_API_KEY
+        fromDatabase:
+          name: vrp-solver-db
+          property: connectionString
+    plan: free
+    numInstances: 1
+    regions: ["oregon"]
+    healthCheckPath: /

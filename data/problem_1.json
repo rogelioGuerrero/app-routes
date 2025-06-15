@@ -1,0 +1,16 @@
+{
+    "locations": [
+        { "id": "depot_1", "coords": [-3.703790, 40.416775] },
+        { "id": "customer_1", "coords": [-3.70123, 40.41545], "demand": 1 },
+        { "id": "customer_2", "coords": [-3.69876, 40.41789], "demand": 2 },
+        { "id": "customer_3", "coords": [-3.70590, 40.41995], "demand": 1 }
+    ],
+    "vehicles": [
+        { "id": "vehicle_1", "capacity": 10, "start_location_id": "depot_1", "end_location_id": "depot_1" }
+    ],
+    "depots": [0],
+    "solver_params": {
+        "matrix_type": "ors",
+        "profile": "driving-car"
+    }
+}

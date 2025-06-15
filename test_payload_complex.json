@@ -1,0 +1,279 @@
+{
+  "api_version": "1.0",
+  "optimization_profile": { 
+    "name": "balanced" 
+  },
+  "locations": [
+    {
+      "id": "depot_1",
+      "coords": [-99.1332, 19.4326],
+      "service_time": 0,
+      "demand": 0,
+      "weight_demand": 0,
+      "volume_demand": 0,
+      "time_window_start": 0,
+      "time_window_end": 86400
+    },
+    {
+      "id": "depot_2",
+      "coords": [-99.1932, 19.4926],
+      "service_time": 0,
+      "demand": 0,
+      "weight_demand": 0,
+      "volume_demand": 0,
+      "time_window_start": 0,
+      "time_window_end": 86400
+    },
+    {
+      "id": "client_A_fridge",
+      "coords": [-99.1500, 19.4000],
+      "service_time": 180,
+      "demand": 5,
+      "weight_demand": 25,
+      "volume_demand": 3,
+      "time_window_start": 32400,
+      "time_window_end": 46800,
+      "required_skills": ["refrigeration"]
+    },
+    {
+      "id": "client_B_weights",
+      "coords": [-99.1000, 19.4500],
+      "service_time": 120,
+      "demand": 3,
+      "weight_demand": 60,
+      "volume_demand": 4,
+      "time_window_start": 28800,
+      "time_window_end": 54000
+    },
+    {
+      "id": "client_C_office",
+      "coords": [-99.1700, 19.4200],
+      "service_time": 120,
+      "demand": 4,
+      "weight_demand": 15,
+      "volume_demand": 6,
+      "time_window_start": 32400,
+      "time_window_end": 46800,
+      "required_skills": ["general_cargo"]
+    },
+    {
+      "id": "client_D_retail",
+      "coords": [-99.1200, 19.4300],
+      "service_time": 180,
+      "demand": 8,
+      "weight_demand": 40,
+      "volume_demand": 5,
+      "time_window_start": 36000,
+      "time_window_end": 61200
+    },
+    {
+      "id": "client_E_express",
+      "coords": [-99.0900, 19.4100],
+      "service_time": 120,
+      "demand": 2,
+      "weight_demand": 8,
+      "volume_demand": 1,
+      "time_window_start": 36000,
+      "time_window_end": 46800,
+      "required_skills": ["express_delivery"]
+    },
+    {
+      "id": "client_F_restaurant",
+      "coords": [-99.1400, 19.3900],
+      "service_time": 180,
+      "demand": 6,
+      "weight_demand": 30,
+      "volume_demand": 4,
+      "time_window_start": 36000,
+      "time_window_end": 46800,
+      "required_skills": ["food_delivery"]
+    },
+    {
+      "id": "client_G_pharmacy",
+      "coords": [-99.1600, 19.4100],
+      "service_time": 150,
+      "demand": 3,
+      "weight_demand": 10,
+      "volume_demand": 2,
+      "time_window_start": 32400,
+      "time_window_end": 43200,
+      "required_skills": ["refrigeration"]
+    },
+    {
+      "id": "client_H_shop",
+      "coords": [-99.1100, 19.4200],
+      "service_time": 120,
+      "demand": 4,
+      "weight_demand": 20,
+      "volume_demand": 3,
+      "time_window_start": 36000,
+      "time_window_end": 50400
+    },
+    {
+      "id": "pickup_heavy_item",
+      "coords": [-99.1800, 19.3800],
+      "service_time": 180,
+      "demand": -10,
+      "weight_demand": -50,
+      "volume_demand": -4,
+      "time_window_start": 0,
+      "time_window_end": 86400
+    },
+    {
+      "id": "delivery_heavy_item",
+      "coords": [-99.0500, 19.5000],
+      "service_time": 180,
+      "demand": 10,
+      "weight_demand": 50,
+      "volume_demand": 4,
+      "time_window_start": 0,
+      "time_window_end": 86400
+    },
+    {
+      "id": "pickup_office_supplies",
+      "coords": [-99.1600, 19.4400],
+      "service_time": 120,
+      "demand": -1,
+      "weight_demand": -2,
+      "volume_demand": -0.5,
+      "time_window_start": 0,
+      "time_window_end": 86400,
+      "required_skills": ["general_cargo"]
+    },
+    {
+      "id": "delivery_office_supplies",
+      "coords": [-99.1300, 19.4700],
+      "service_time": 150,
+      "demand": 1,
+      "weight_demand": 2,
+      "volume_demand": 0.5,
+      "time_window_start": 0,
+      "time_window_end": 86400,
+      "required_skills": ["general_cargo"]
+    },
+    {
+      "id": "pickup_fragile",
+      "coords": [-99.1700, 19.4500],
+      "service_time": 150,
+      "demand": -2,
+      "weight_demand": -10,
+      "volume_demand": -1,
+      "time_window_start": 0,
+      "time_window_end": 86400,
+      "required_skills": ["fragile_goods"]
+    },
+    {
+      "id": "delivery_fragile",
+      "coords": [-99.1400, 19.4600],
+      "service_time": 180,
+      "demand": 2,
+      "weight_demand": 10,
+      "volume_demand": 1,
+      "time_window_start": 0,
+      "time_window_end": 86400,
+      "required_skills": ["fragile_goods"]
+    }
+  ],
+  "vehicles": [
+    {
+      "id": "van_standard_1",
+      "capacity": 15,
+      "fixed_cost": 10,
+      "cost_per_km": 0.5,
+      "weight_capacity": 50,
+      "volume_capacity": 5,
+      "skills": ["general_cargo"],
+      "start_location_id": "depot_1",
+      "end_location_id": "depot_1"
+    },
+    {
+      "id": "van_standard_2",
+      "capacity": 15,
+      "fixed_cost": 10,
+      "cost_per_km": 0.5,
+      "weight_capacity": 50,
+      "volume_capacity": 5,
+      "skills": ["general_cargo"],
+      "start_location_id": "depot_1",
+      "end_location_id": "depot_1"
+    },
+    {
+      "id": "van_refrigerated_1",
+      "capacity": 20,
+      "fixed_cost": 15,
+      "cost_per_km": 0.6,
+      "weight_capacity": 60,
+      "volume_capacity": 6,
+      "skills": ["refrigeration", "fragile_goods"],
+      "start_location_id": "depot_2",
+      "end_location_id": "depot_2"
+    },
+    {
+      "id": "van_refrigerated_2",
+      "capacity": 20,
+      "fixed_cost": 15,
+      "cost_per_km": 0.55,
+      "weight_capacity": 60,
+      "volume_capacity": 6,
+      "skills": ["refrigeration"],
+      "start_location_id": "depot_2",
+      "end_location_id": "depot_2"
+    },
+    {
+      "id": "scooter_express_1",
+      "capacity": 8,
+      "fixed_cost": 5,
+      "cost_per_km": 0.3,
+      "weight_capacity": 15,
+      "volume_capacity": 1.5,
+      "skills": ["express_delivery", "food_delivery"],
+      "start_location_id": "depot_1",
+      "end_location_id": "depot_1"
+    },
+    {
+      "id": "scooter_express_2",
+      "capacity": 8,
+      "fixed_cost": 5,
+      "cost_per_km": 0.3,
+      "weight_capacity": 15,
+      "volume_capacity": 1.5,
+      "skills": ["express_delivery", "food_delivery"],
+      "start_location_id": "depot_1",
+      "end_location_id": "depot_1"
+    },
+    {
+      "id": "pickup_truck",
+      "capacity": 25,
+      "fixed_cost": 20,
+      "cost_per_km": 0.7,
+      "weight_capacity": 80,
+      "volume_capacity": 8,
+      "skills": ["general_cargo", "bulk_delivery"],
+      "start_location_id": "depot_1",
+      "end_location_id": "depot_1"
+    },
+    {
+      "id": "bike_messenger",
+      "capacity": 3,
+      "fixed_cost": 3,
+      "cost_per_km": 0.2,
+      "weight_capacity": 6,
+      "volume_capacity": 0.6,
+      "skills": ["express_delivery", "document_delivery"],
+      "start_location_id": "depot_1",
+      "end_location_id": "depot_1"
+    }
+  ],
+  "depots": [0, 1],
+  "pickups_deliveries": [
+    ["pickup_heavy_item", "delivery_heavy_item"],
+    ["pickup_office_supplies", "delivery_office_supplies"],
+    ["pickup_fragile", "delivery_fragile"]
+  ],
+  "allow_skipping_nodes": true,
+  "penalties": [10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000, 10000],
+  "time_limit_seconds": 120,
+  "balance_routes": true,
+  "max_vehicles": 8,
+  "vehicle_limit": 8
+}
