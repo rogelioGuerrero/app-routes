@@ -1,6 +1,10 @@
 # Archivos de entorno
 .env
 
+# Carpetas a excluir
+tests/
+output/
+
 # Python
 __pycache__/
 *.py[cod]
@@ -8,6 +12,42 @@ __pycache__/
 *.so
 .Python
 build/
+
+# Archivos de desarrollo y pruebas
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Archivos del sistema operativo
+.DS_Store
+Thumbs.db
+
+# Entornos virtuales
+venv/
+venv_cascade/
+ENV/
+
+# Archivos de IDE
+.vscode/
+.idea/
+
+# Archivos de caché
+.cache/
+.mypy_cache/
+
+# Archivos de paquetes
+dist/
+*.egg-info/
+*.egg
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+
 develop-eggs/
 dist/
 downloads/
