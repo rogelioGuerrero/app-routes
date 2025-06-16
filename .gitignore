@@ -86,3 +86,9 @@ ENV/
 # Archivos del sistema operativo
 .DS_Store
 Thumbs.db
+
+# Archivos de datos y soluciones
+
+temp_*.json
+*_solution.json
+solution.json
