@@ -14,6 +14,7 @@ import os
 import aiohttp
 
 from ortools.constraint_solver import routing_enums_pb2, pywrapcp
+from .post_processors import add_suggested_departure_times
 
 # Importar la instancia de caché existente
 from services.distance_matrix.cache import matrix_cache
@@ -381,6 +382,7 @@ class VRPTWSolver(BaseVRPSolver):
         self.manager: Optional[pywrapcp.RoutingIndexManager] = None
         self.routing: Optional[pywrapcp.RoutingModel] = None
         self.data: Dict[str, Any] = {}
+        self.solver_params: Dict[str, Any] = {}
         self.status_map = {
             routing_enums_pb2.RoutingSearchStatus.ROUTING_NOT_SOLVED: VRPSolutionStatus.NO_SOLUTION_FOUND,
             routing_enums_pb2.RoutingSearchStatus.ROUTING_SUCCESS: VRPSolutionStatus.FEASIBLE,
@@ -420,6 +422,7 @@ class VRPTWSolver(BaseVRPSolver):
         self.vehicles = vehicles
         self.depot_ids = {loc['id'] for i, loc in enumerate(locations) if i in (depots or [])}
         self.allow_skipping_nodes = kwargs.get('allow_skipping_nodes', False)
+        self.solver_params = kwargs.get('solver_params', {})
         self.penalties = kwargs.get('penalties', None) # Almacenar penalizaciones
         self.location_required_skills = kwargs.get('location_required_skills', None)
         self.vehicle_skills = kwargs.get('vehicle_skills', None)
@@ -454,9 +457,25 @@ class VRPTWSolver(BaseVRPSolver):
         # Extract starts_indices and ends_indices from kwargs, expected from AdvancedSolverAdapter
         s_indices = kwargs.get('starts_indices')
         e_indices = kwargs.get('ends_indices')
+        starts_ends = kwargs.get('starts_ends')
+
+        num_vehicles = len(vehicles)
+
+        if starts_ends and len(starts_ends) == num_vehicles:
+            logger.debug(f"Using 'starts_ends' from kwargs to define start/end nodes: {starts_ends}")
+            starts_indices = [item[0] for item in starts_ends]
+            ends_indices = [item[1] for item in starts_ends]
+        else:
+            logger.warning(f"'starts_ends' not found or invalid in kwargs (expected len {num_vehicles}, got {len(starts_ends) if starts_ends else 'None'}). Falling back to default depot assignment.")
+            # Fallback logic based on vehicle's home depot, which is more robust
+            starts_indices = [self.location_id_to_index.get(v.get('start_location_id'), depots[i % len(depots)]) for i, v in enumerate(self.vehicles)]
+            ends_indices = [self.location_id_to_index.get(v.get('end_location_id'), depots[i % len(depots)]) for i, v in enumerate(self.vehicles)]
+            logger.warning(f"Fallback starts_indices: {starts_indices}")
+            logger.warning(f"Fallback ends_indices: {ends_indices}")
 
         # Determine the default node (typically the first depot, or 0 if no depots specified)
         # This default_node is used if starts/ends information is missing or incomplete.
+        # Skipping explicit skill checks for nodes identified as depots.
         effective_depots = depots if depots is not None else [0]
         default_node_for_vehicles = effective_depots[0] if effective_depots else 0
 
@@ -523,7 +542,7 @@ class VRPTWSolver(BaseVRPSolver):
         self.routing = pywrapcp.RoutingModel(self.manager)
         logger.debug("VRPTWSolver.load_problem: RoutingIndexManager and RoutingModel created.")
 
-    def _add_constraints(self, solver_params: Optional[dict] = None) -> None:
+    def _add_constraints(self) -> None:
         if not self.routing or not self.manager or not self.data:
             logger.error("_add_constraints called before problem loaded or manager/routing initialized.")
             raise ValueError("Problem data, manager, or routing model not initialized.")
@@ -542,17 +561,21 @@ class VRPTWSolver(BaseVRPSolver):
         self.routing.SetArcCostEvaluatorOfAllVehicles(dist_callback_index)
 
         if self.data.get('dur'):
-            def time_callback(from_index, to_index):
+            def time_callback_with_service(from_index, to_index):
+                """Returns the total time (travel + service) between two locations."""
                 from_node = self.manager.IndexToNode(from_index)
                 to_node = self.manager.IndexToNode(to_index)
-                # Travel time from duration matrix
+                
+                # Travel time from the duration matrix
                 travel_time = self.data['dur'][from_node][to_node]
-                # Service time at the 'from_node' (location being departed from after service)
-                # Note: OR-Tools expects service time to be part of the time dimension at the node itself.
-                # Here, we are defining arc travel time. Service times are added to the time dimension cumul vars.
-                return travel_time
+                
+                # Service time at the 'from' node.
+                # Depots have 0 service time, so this is safe for the first arc.
+                service_time = self.locations[from_node].service_time or 0
+                
+                return int(service_time + travel_time)
 
-            time_callback_index = self.routing.RegisterTransitCallback(time_callback)
+            time_callback_index = self.routing.RegisterTransitCallback(time_callback_with_service)
             self.transit_callbacks.append(time_callback_index) # Keep reference
 
             # Determine a suitable horizon for the time dimension (max duration of a route)
@@ -566,19 +589,56 @@ class VRPTWSolver(BaseVRPSolver):
 
             self.routing.AddDimension(
                 time_callback_index,
-                0,  # Slack (waiting time) - 0 for no waiting allowed beyond service time
+                time_dimension_capacity,  # Slack (waiting time) - Allow waiting up to horizon
                 time_dimension_capacity, # Horizon
                 False,  # Start cumul to zero for all vehicles
                 'Time'
             )
             time_dimension = self.routing.GetDimensionOrDie('Time')
             
-            # Apply time window constraints to each location
-            # CumulVar(node_index) represents arrival time at node_index.
-            # Service time at node_index is handled by the time_plus_service_callback when leaving node_index.
+            # Add time window constraints for each location.
+            # This applies to all nodes, ensuring that if a depot is visited mid-route,
+            # it also respects its time window.
             for i, loc_obj in enumerate(self.locations):
-                node_idx_in_manager = self.manager.NodeToIndex(i)
-                time_dimension.CumulVar(node_idx_in_manager).SetRange(int(loc_obj.time_window_start), int(loc_obj.time_window_end))
+                if loc_obj.time_window_start is not None and loc_obj.time_window_end is not None:
+                    node_idx_in_manager = self.manager.NodeToIndex(i)
+                    time_dimension.CumulVar(node_idx_in_manager).SetRange(
+                        int(loc_obj.time_window_start),
+                        int(loc_obj.time_window_end)
+                    )
+
+            # Add time window constraints for each vehicle's START node.
+            # This is the critical part to ensure routes start within the depot's time window.
+            for vehicle_id in range(self.data['num_veh']):
+                start_node_idx = self.data['starts'][vehicle_id]
+                start_loc_obj = self.locations[start_node_idx]
+                
+                if start_loc_obj.time_window_start is not None and start_loc_obj.time_window_end is not None:
+                    index = self.routing.Start(vehicle_id)
+                    time_dimension.CumulVar(index).SetRange(
+                        int(start_loc_obj.time_window_start),
+                        int(start_loc_obj.time_window_end)
+                    )
+            
+            # Apply costs for slack (waiting time) and span (total route duration).
+            # Additionally, maximise the start time of each vehicle to encourage late departures,
+            # reducing waiting at the first customer while still respecting all windows.
+            time_slack_cost = self.solver_params.get("time_slack_cost_coefficient", 0)
+            time_span_cost = self.solver_params.get("time_span_cost_coefficient", 0)
+
+            if time_slack_cost > 0 or time_span_cost > 0:
+                for v_idx in range(self.data['num_veh']):
+                    if time_slack_cost > 0:
+                        time_dimension.SetSlackCostCoefficientForVehicle(time_slack_cost, v_idx)
+                        logger.debug(f"Vehicle {v_idx}: Set time_slack_cost_coefficient to {time_slack_cost}")
+                    if time_span_cost > 0:
+                        time_dimension.SetSpanCostCoefficientForVehicle(time_span_cost, v_idx)
+                        logger.debug(f"Vehicle {v_idx}: Set time_span_cost_coefficient to {time_span_cost}")
+
+                    # Encourage vehicles to depart as late as feasible (just-in-time) by
+                    # maximising the start cumul variable during the finalization phase.
+                    start_index = self.routing.Start(v_idx)
+                    self.routing.AddVariableMaximizedByFinalizer(time_dimension.CumulVar(start_index))
 
         # --- Capacity Dimensions (Generic, Weight, Volume) ---
         def demand_callback(from_index):
@@ -586,7 +646,7 @@ class VRPTWSolver(BaseVRPSolver):
             return self.data['demands'][from_node]
         
         demand_callback_index = self.routing.RegisterUnaryTransitCallback(demand_callback)
-        self.transit_callbacks.append(demand_callback_index)
+        self.transit_callbacks.append(demand_callback_index) # Keep reference
         self.routing.AddDimensionWithVehicleCapacity(
             demand_callback_index,
             0,  # Slack for capacity
@@ -618,40 +678,59 @@ class VRPTWSolver(BaseVRPSolver):
         # --- Pickup and Delivery Constraints ---
         if self.data.get('pd'):
             time_dim_for_pd = self.routing.GetDimensionOrDie('Time') if self.data.get('dur') else None
+            
             for pickup_idx, delivery_idx in self.data['pd']:
-                pickup_node_idx = self.manager.NodeToIndex(pickup_idx)
-                delivery_node_idx = self.manager.NodeToIndex(delivery_idx)
-                self.routing.AddPickupAndDelivery(pickup_node_idx, delivery_node_idx)
-                # Ensure same vehicle serves pickup and delivery
-                self.routing.solver().Add(self.routing.VehicleVar(pickup_node_idx) == self.routing.VehicleVar(delivery_node_idx))
-                # Ensure pickup happens before delivery (in terms of routing order and time if applicable)
+                pickup_node_manager_idx = self.manager.NodeToIndex(pickup_idx)
+                delivery_node_manager_idx = self.manager.NodeToIndex(delivery_idx)
+
+                # Core constraints: same vehicle and time precedence.
+                self.routing.solver().Add(
+                    self.routing.VehicleVar(pickup_node_manager_idx) == self.routing.VehicleVar(delivery_node_manager_idx)
+                )
                 if time_dim_for_pd:
-                    self.routing.solver().Add(time_dim_for_pd.CumulVar(pickup_node_idx) <= time_dim_for_pd.CumulVar(delivery_node_idx))
-                else: # If no time dimension, rely on order in path
-                    # This is implicitly handled by AddPickupAndDelivery's effect on node order search
-                    pass 
+                    self.routing.solver().Add(
+                        time_dim_for_pd.CumulVar(pickup_node_manager_idx) <= time_dim_for_pd.CumulVar(delivery_node_manager_idx)
+                    )
+                
+                # Link active state: if one is served, the other must be too.
+                # This is crucial for making them optional *as a pair* when disjunctions are used.
+                if self.allow_skipping_nodes:
+                    self.routing.solver().Add(
+                        self.routing.ActiveVar(pickup_node_manager_idx) == self.routing.ActiveVar(delivery_node_manager_idx)
+                    ) 
 
         # --- Node Skipping (Penalties) ---
         if self.allow_skipping_nodes:
-            base_penalty = 1_000_000 # Default large penalty
-            # Apply penalties from problem data if available, else use base_penalty
-            # Penalties can be a list (per location) or a single value for all skippable nodes.
-            # For simplicity, assume penalties is a dict {location_id: penalty_value} or None
+            base_penalty = 1_000_000
+            base_penalty_pd = 2_000_000  # Higher penalty for P&D pairs, can be customized
+
+            pd_pickup_nodes = {pair[0] for pair in self.data.get('pd', [])}
+            all_pd_nodes = {node for pair in self.data.get('pd', []) for node in pair}
+
             for i in range(self.data['n']):
-                # Do not allow depots to be skipped
-                if i in self.data.get('depots', []): 
+                if i in self.data.get('depots', []):
                     continue
-                
-                loc_id = self.locations[i].id
-                penalty_value = base_penalty
-                if self.penalties and isinstance(self.penalties, dict) and loc_id in self.penalties:
-                    penalty_value = self.penalties[loc_id]
-                elif isinstance(self.penalties, (int, float)):
-                    penalty_value = self.penalties
-                
-                # Ensure penalty is non-negative
-                penalty_value = max(0, int(penalty_value))
-                self.routing.AddDisjunction([self.manager.NodeToIndex(i)], penalty_value)
+
+                node_manager_idx = self.manager.NodeToIndex(i)
+
+                # Handle P&D pairs by adding a disjunction to the pickup node.
+                # The linked active status (defined in P&D constraints) ensures the whole pair is dropped.
+                if i in pd_pickup_nodes:
+                    # TODO: Get penalty from input data for the pair.
+                    penalty_for_pair = base_penalty_pd
+                    self.routing.AddDisjunction([node_manager_idx], penalty_for_pair)
+
+                # Handle standalone nodes (nodes not in any P&D pair).
+                elif i not in all_pd_nodes:
+                    loc_id = self.locations[i].id
+                    penalty_value = base_penalty
+                    if self.penalties and isinstance(self.penalties, dict) and loc_id in self.penalties:
+                        penalty_value = self.penalties[loc_id]
+                    elif isinstance(self.penalties, (int, float)):
+                        penalty_value = self.penalties
+                    
+                    penalty_value = max(0, int(penalty_value))
+                    self.routing.AddDisjunction([node_manager_idx], penalty_value)
 
         # --- Skill Constraints ---
         if self.location_required_skills and self.vehicle_skills:
@@ -712,20 +791,20 @@ class VRPTWSolver(BaseVRPSolver):
 
         logger.debug("_add_constraints completed.")
 
-    async def solve(self, time_limit_seconds=30, solver_params: dict = None) -> schemas_VRPTWSolution: 
+    async def solve(self, time_limit_seconds=30) -> schemas_VRPTWSolution: 
         logger.debug(f"VRPTWSolver.solve: self.pydantic_vehicles (count: {len(self.pydantic_vehicles_map) if self.pydantic_vehicles_map else 0}). Types: {[type(v) for v in self.pydantic_vehicles_map.values()] if self.pydantic_vehicles_map else []}") 
         if not self.data or not self.manager:
             raise ValueError("Problem data not loaded. Call load_problem first.")
 
         # --- Lógica de Restricciones ---
-        self._add_constraints(solver_params)
+        self._add_constraints()
 
         # --- Búsqueda de Solución ---
         params = pywrapcp.DefaultRoutingSearchParameters()
         params.first_solution_strategy = (routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
         params.time_limit.FromSeconds(time_limit_seconds)
 
-        if solver_params and solver_params.get("use_metaheuristic", False):
+        if self.solver_params.get("use_metaheuristic", False):
             params.local_search_metaheuristic = (routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
 
         start_time = time.time()
@@ -763,7 +842,17 @@ class VRPTWSolver(BaseVRPSolver):
         if formatted_solution.metadata is None:
             formatted_solution.metadata = {}
         formatted_solution.metadata['solver_time_seconds'] = round(end_time - start_time, 2)
+
+        # Post-process: desplazar salidas para minimizar esperas.
+        try:
+            add_suggested_departure_times(
+                formatted_solution,
+                self.locations,
+                self.location_id_to_index,
+                self.data.get('dur', [])
+            )
+        except Exception as e:
+            logger.warning(f"shift_departure_times post-processing failed: {e}")
         
         return formatted_solution
-
 

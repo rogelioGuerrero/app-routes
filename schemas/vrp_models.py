@@ -108,6 +108,7 @@ class Route(BaseModel):
     total_load: float
     total_time: Optional[float] = None
     polyline_ors: Optional[str] = Field(None, description="Polyline codificado de OpenRouteService para la ruta")
+    suggested_depot_departure: Optional[int] = Field(None, description="Hora recomendada de salida del depósito (segundos desde medianoche)")
 
 class CVRPSolution(BaseModel):
     """Solución de un problema CVRP."""

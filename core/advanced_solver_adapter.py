@@ -116,6 +116,27 @@ class AdvancedSolverAdapter:
         distances = matrix_data.distances
         durations = matrix_data.durations
         provider_used = matrix_data.provider
+
+        # Aplicar factor de congestión si se especifica
+        scaled_durations = durations # Por defecto, usar las originales
+        if solver_params and durations:
+            congestion_factor = float(solver_params.get('congestion_factor', 1.0))
+            if congestion_factor < 0.1: # Evitar factores demasiado pequeños o negativos
+                logger.warning(f"Factor de congestión {congestion_factor} es inválido, usando 1.0.")
+                congestion_factor = 1.0
+            
+            if congestion_factor != 1.0: # Solo escalar si el factor es diferente de 1.0
+                logger.info(f"Aplicando factor de congestión {congestion_factor} a la matriz de duraciones.")
+                scaled_durations = [
+                    [int(round(d * congestion_factor)) for d in row]
+                    for row in durations
+                ]
+            else:
+                logger.debug("Factor de congestión es 1.0, no se aplica escalado adicional a las duraciones.")
+        elif durations:
+            logger.debug("No se especificaron solver_params o congestion_factor, usando duraciones originales.")
+        else:
+            logger.debug("Matriz de duraciones no disponible, no se aplica factor de congestión.")
         logger.debug(f"Matrix data received: distances_shape={len(matrix_data.distances) if matrix_data.distances else 'None'}x{len(matrix_data.distances[0]) if matrix_data.distances and matrix_data.distances[0] else 'None'}, durations_shape={len(matrix_data.durations) if matrix_data.durations else 'None'}x{len(matrix_data.durations[0]) if matrix_data.durations and matrix_data.durations[0] else 'None'}, provider={provider_used}")
         # Acceder a 'from_cache' desde el diccionario de metadatos de MatrixResult
         from_cache = False # Default to False
@@ -141,7 +162,7 @@ class AdvancedSolverAdapter:
             solver = CVRPSolver()
             solver.load_problem(
                 distance_matrix=distances,
-                duration_matrix=durations,
+                duration_matrix=scaled_durations, # Usar matriz escalada
                 locations=locations,
                 vehicles=vehicles,
                 optimization_profile=optimization_profile
@@ -205,7 +226,7 @@ class AdvancedSolverAdapter:
 
             self.solver.load_problem(
                 distance_matrix=distances,
-                duration_matrix=durations,
+                duration_matrix=scaled_durations, # Usar matriz escalada
                 locations=locations,
                 vehicles=vehicles,
                 depots=final_depots,
