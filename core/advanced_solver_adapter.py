@@ -214,26 +214,28 @@ class AdvancedSolverAdapter:
             location_required_skills_list = [loc.get('required_skills') for loc in locations]
             vehicle_skills_list_for_load = [v_data.get('skills') for v_data in vehicles]
 
-            # Prepare kwargs for load_problem
-            load_problem_kwargs = {
+            # Derive starts_indices and ends_indices from final_starts_ends
+            starts_indices = [se[0] for se in final_starts_ends] if final_starts_ends else [final_depots[0]] * len(vehicles)
+            ends_indices = [se[1] for se in final_starts_ends] if final_starts_ends else [final_depots[0]] * len(vehicles)
+
+            # Collect all relevant data into a dictionary for the solver
+            solver_kwargs = {
+                'distance_matrix': distances,
+                'duration_matrix': scaled_durations,
+                'locations': locations,
+                'vehicles': vehicles,
+                'depots': final_depots,
+                'starts_ends': final_starts_ends,
+                'starts_indices': starts_indices,
+                'ends_indices': ends_indices,
+                'pickups_deliveries': pickups_deliveries,
                 'allow_skipping_nodes': allow_skipping,
-                'penalties': penalties,
+                'optimization_profile': optimization_profile,
                 'location_required_skills': location_required_skills_list,
                 'vehicle_skills': vehicle_skills_list_for_load,
-                'optimization_profile': optimization_profile
             }
-            load_problem_kwargs = {k: v for k, v in load_problem_kwargs.items() if v is not None}
 
-            self.solver.load_problem(
-                distance_matrix=distances,
-                duration_matrix=scaled_durations, # Usar matriz escalada
-                locations=locations,
-                vehicles=vehicles,
-                depots=final_depots,
-                starts_ends=final_starts_ends,
-                pickups_deliveries=pickups_deliveries,
-                **load_problem_kwargs
-            )
+            self.solver.load_problem(**solver_kwargs)
             sol = await self.solver.solve(time_limit_seconds=time_limit_seconds)
 
         logger.info(f"AdvancedSolverAdapter.solve_unified: solver devolvió estado={sol.status}")
