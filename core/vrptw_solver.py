@@ -433,15 +433,15 @@ class VRPTWSolver(BaseVRPSolver):
         # --- Dimensiones de Capacidad ---
         # Capacidad/Demanda Genérica
         caps = [int(round(v.get('capacity', 0))) for v in self.vehicles]
-        demands = [int(round(-loc.demand)) for loc in self.locations]
+        demands = [int(round(loc.demand)) for loc in self.locations]
 
         # Capacidad/Demanda de Peso
         weight_caps = [int(round(v.get('weight_capacity', 0))) for v in self.vehicles]
-        weight_demands = [int(round(-getattr(loc, 'weight_demand', 0))) for loc in self.locations]
+        weight_demands = [int(round(getattr(loc, 'weight_demand', 0))) for loc in self.locations]
 
         # Capacidad/Demanda de Volumen
         volume_caps = [int(round(v.get('volume_capacity', 0))) for v in self.vehicles]
-        volume_demands = [int(round(-getattr(loc, 'volume_demand', 0))) for loc in self.locations]
+        volume_demands = [int(round(getattr(loc, 'volume_demand', 0))) for loc in self.locations]
 
         tw = [(loc.time_window_start, loc.time_window_end) for loc in self.locations]
 
