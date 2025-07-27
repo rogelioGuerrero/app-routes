@@ -1,0 +1,13 @@
+fastapi>=0.68.0,<1.0.0
+uvicorn>=0.15.0,<1.0.0
+pydantic>=1.8.0,<3.0.0
+ortools>=9.0.0,<10.0.0
+python-dotenv>=0.19.0
+numpy>=1.20.0
+geopy>=2.2.0
+aiohttp>=3.8.0
+nextplot>=0.1.4
+python-multipart>=0.0.5
+diskcache>=5.0.0
+pytest>=7.0.0
+pytest-asyncio>=0.18.0
