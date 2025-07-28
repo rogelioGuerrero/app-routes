@@ -143,6 +143,12 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+@tmp/
+docs/
+examples/
+test_local/
+output/
+solvers/
 
 # Spyder project settings
 .spyderproject

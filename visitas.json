@@ -1,0 +1,66 @@
+{
+    "locations": [
+      {
+        "id": "oficina_central",
+        "name": "Oficina Central",
+        "coords": [-99.1332, 19.4326],
+        "type": "depot",
+        "time_window_start": 28800,
+        "time_window_end": 68400,
+        "weight_demand": 0,
+        "volume_demand": 0
+      },
+      {
+        "id": "cliente_101",
+        "name": "Casa Familia Pérez - Instalación internet",
+        "coords": [-99.1637, 19.4194],
+        "type": "pickup",
+        "service_time": 3600,
+        "time_window_start": 36000,
+        "time_window_end": 43200,
+        "required_skills": ["instalacion_fibra", "configuracion_router"],
+        "weight_demand": 1,
+        "volume_demand": 0.1
+      },
+      {
+        "id": "cliente_102",
+        "name": "Oficinas Acme - Mantenimiento preventivo",
+        "coords": [-99.1409, 19.4326],
+        "type": "pickup",
+        "service_time": 5400,
+        "time_window_start": 43200,
+        "time_window_end": 54000,
+        "required_skills": ["mantenimiento_redes"],
+        "weight_demand": 1,
+        "volume_demand": 0.1
+      }
+    ],
+    "vehicles": [
+      {
+        "id": "tec_juan",
+        "name": "Juan Pérez - Técnico Senior",
+        "weight_capacity": 10,
+        "volume_capacity": 5.0,
+        "start_location_id": "oficina_central",
+        "end_location_id": "oficina_central",
+        "start_time": 28800,
+        "end_time": 64800,
+        "skills": ["instalacion_fibra", "configuracion_router", "mantenimiento_redes"],
+        "breaks": [
+          {
+            "id": "descanso",
+            "type": "scheduled",
+            "duration": 1800,
+            "earliest_start": 43200,
+            "latest_start": 46800
+          }
+        ]
+      }
+    ],
+    "allow_skipping_nodes": false,
+    "optimization_profile": {
+      "first_solution_strategy": "PATH_CHEAPEST_ARC",
+      "local_search_metaheuristic": "GUIDED_LOCAL_SEARCH",
+      "time_limit_seconds": 10
+    }
+  }
