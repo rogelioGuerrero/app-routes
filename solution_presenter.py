@@ -343,27 +343,61 @@ class JsonSolutionPresenter:
                 total_stops += 1
                 route_distance = max(route_distance, node.get('distance', 0))
             
-            # Calcular duración de la ruta
+            # Calcular duración y distancia total de la ruta
+            route_duration = 0
+            route_total_distance = 0
+            
+            # Si hay paradas, calcular duración y distancia
             if stops:
-                # Convertir HH:MM:SS a segundos
+                # Convertir HH:MM:SS a segundos para calcular la duración
                 start_time = sum(int(x) * 60 ** (2 - i) for i, x in enumerate(stops[0]['arrival'].split(":")))
                 end_time = sum(int(x) * 60 ** (2 - i) for i, x in enumerate(stops[-1]['departure'].split(":")))
                 route_duration = end_time - start_time
-                total_duration += route_duration
                 
-                # Calcular métricas de capacidad
-                max_weight = max(stop['load']['weight'] for stop in stops) if stops else 0
-                max_volume = max(stop['load']['volume'] for stop in stops) if stops else 0
+                # Calcular distancia total sumando distancias entre nodos consecutivos
+                route_nodes = route.get('route', [])
+                route_total_distance = 0
                 
-                formatted_routes.append({
-                    "vehicle": {
-                        "id": route.get('vehicle_id', ''),
-                        "name": route.get('vehicle_name', '')
-                    },
-                    "stops": stops,
-
+                # Si la ruta tiene nodos con coordenadas, calcular distancias euclidianas
+                if len(route_nodes) > 1 and 'coords' in route_nodes[0]:
+                    import math
+                    for i in range(len(route_nodes) - 1):
+                        current = route_nodes[i]
+                        next_node = route_nodes[i + 1]
+                        
+                        if 'coords' in current and 'coords' in next_node:
+                            from_lat, from_lon = current['coords']
+                            to_lat, to_lon = next_node['coords']
+                            
+                            # Fórmula de distancia euclidiana simplificada (aproximación en metros)
+                            dx = (to_lon - from_lon) * 111.32 * 1000 * math.cos(math.radians((from_lat + to_lat) / 2))
+                            dy = (to_lat - from_lat) * 111.32 * 1000
+                            route_total_distance += math.sqrt(dx*dx + dy*dy)
+                
+                # Si no se pudo calcular la distancia, usar el valor del nodo
+                if route_total_distance <= 0:
+                    route_total_distance = max(node.get('distance', 0) for node in route_nodes if 'distance' in node)
+            
+            # Calcular métricas de capacidad
+            max_weight = max((stop['load']['weight'] for stop in stops), default=0)
+            max_volume = max((stop['load']['volume'] for stop in stops), default=0)
+            
+            # Agregar ruta formateada
+            formatted_routes.append({
+                "vehicle": {
+                    "id": route.get('vehicle_id', ''),
+                    "name": route.get('vehicle_name', '')
+                },
+                "stops": stops,
+                "metrics": {
+                    "total_distance": route_total_distance,  # en metros
+                    "total_duration": route_duration,        # en segundos
+                    "total_stops": len(stops),
+                    "max_weight": max_weight,
+                    "max_volume": max_volume
+                }
                 })
-
+        
         # Respuesta final mejorada
         return {
             "status": "success",
