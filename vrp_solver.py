@@ -446,7 +446,6 @@ class VRPSolver:
                 'vehicle_id': self.vehicles[vehicle_id].get('id'),
                 'vehicle_name': self.vehicles[vehicle_id].get('name'),
                 'route': [],
-                'breaks': [],
                 'distance': 0,
                 'time': 0,
                 'load_weight': 0,
@@ -519,8 +518,6 @@ class VRPSolver:
             route_data['distance'] = route_distance
             route_data['time'] = self.solution.Value(time_var)
             
-            
-            
             # Solo agregar la ruta si tiene más de un nodo (origen y destino)
             if len(route_data['route']) > 1:
                 solution_data['routes'].append(route_data)
@@ -534,7 +531,6 @@ class VRPSolver:
                     'distance': route_data['distance'],
                     'time': route_data['time'],
                     'nodes_visited': len(route_data['route']),
-                    'breaks_taken': len(route_data['breaks'])
                 })
         
         logger.info(f"Solución extraída: {len(solution_data['routes'])} rutas, "

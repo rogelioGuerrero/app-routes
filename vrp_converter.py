@@ -42,9 +42,6 @@ class JsonToVrpDataConverter:
         self.matrix_cache_used: bool = False
         self.vrp_data: Dict[str, Any] | None = None
 
-
-        # No se manejan breaks en esta versión
-
     # ---------------------------------------------------------------------
     # Matrices distancia / duración
     # ---------------------------------------------------------------------
@@ -214,48 +211,8 @@ class JsonToVrpDataConverter:
         return dist_mat, time_mat
 
     # ------------------------------------------------------------------
-    # Breaks helpers
+    # Helpers de congestión
     # ------------------------------------------------------------------
-    def _extract_breaks(self) -> Dict[int, List[Dict[str, int]]]:
-        """Devuelve dict {veh_idx: [ {earliest, latest, duration}, ... ]}."""
-        breaks: Dict[int, List[Dict[str, int]]] = {}
-
-        for idx, v in enumerate(self.vehicles):
-            veh_breaks = v.get("breaks")
-            if veh_breaks:
-                breaks[idx] = veh_breaks
-
-        # Soportar formato alternativo en la raíz: 'breaks' (dict) o 'vehicle_breaks' (list)
-        top_breaks_dict = self.scenario.get("breaks", {})
-        if top_breaks_dict:
-            id_to_idx = {v["id"]: i for i, v in enumerate(self.vehicles)}
-            for veh_id, lst in top_breaks_dict.items():
-                idx = id_to_idx.get(veh_id)
-                if idx is not None:
-                    breaks[idx] = lst
-
-        # Soportar lista de objetos con estructura {vehicle_id, time_window: [start,end], duration}
-        top_breaks_list = self.scenario.get("vehicle_breaks", [])
-        if isinstance(top_breaks_list, list):
-            for b in top_breaks_list:
-                veh_id = b.get("vehicle_id")
-                tw = b.get("time_window") or []
-                if veh_id is None or len(tw) != 2:
-                    continue
-                idx = veh_id if isinstance(veh_id, int) else None
-                if idx is None:
-                    # Buscar por ID string
-                    id_to_idx = {v["id"]: i for i, v in enumerate(self.vehicles)}
-                    idx = id_to_idx.get(veh_id)
-                if idx is None:
-                    continue
-                break_def = {
-                    "earliest": int(tw[0]),
-                    "latest": int(tw[1]),
-                    "duration": int(b.get("duration", 0)),
-                }
-                breaks.setdefault(idx, []).append(break_def)
-        return breaks
 
     # ------------------------------------------------------------------
     # Conversión principal
@@ -648,7 +605,6 @@ class JsonToVrpDataConverter:
             "vehicle_capacities_weight": [v.get('weight_capacity', 0) for v in self.vehicles],
             "demands_volume": [int(loc.get('volume_demand', 0)) for loc in self.locations],
             "vehicle_capacities_volume": [int(v.get('volume_capacity', 0)) for v in self.vehicles],
-            "breaks": self._extract_breaks(),
             # Habilidades en el nivel raíz para compatibilidad con el solver
             "skills_required": required_skills,  # Ya es una lista de listas
             "vehicle_skills": vehicle_skills,  # Lista de listas de habilidades por vehículo

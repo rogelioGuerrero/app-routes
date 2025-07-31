@@ -132,29 +132,8 @@ class JsonSolutionPresenter:
             volume_capacity = vehicle.get('volume_capacity', 0)
             vehicle_skills = set(vehicle.get('skills', []))
             
-            # Extraer nodos de la ruta y breaks
+            # Extraer nodos de la ruta
             route_nodes = route_data.get('route', [])
-            route_breaks = route_data.get('breaks', [])
-            
-            # Añadir información de breaks a la salida
-            if route_breaks:
-                print(f"[DEBUG] Vehículo {vehicle_id} tiene {len(route_breaks)} breaks configurados")
-                for i, brk in enumerate(route_breaks):
-                    scheduled_start = brk.get('scheduled_start', 'No programado')
-                    scheduled_end = brk.get('scheduled_end', 'No programado')
-                    
-                    # Usar el método de clase para formatear horas
-                    print(f"[DEBUG] Break {i+1}: {brk.get('id')}")
-                    print(f"  • Duración: {brk.get('duration')}s ({brk.get('duration')/60:.1f} min)")
-                    print(f"  • Ventana: {cls.format_time(brk.get('earliest_start'))} - {cls.format_time(brk.get('latest_start'))}")
-                    print(f"  • Programado: {cls.format_time(scheduled_start)} - {cls.format_time(scheduled_end)}")
-                    
-                    # Verificar si el break está dentro de su ventana
-                    if isinstance(scheduled_start, (int, float)):
-                        if scheduled_start < brk.get('earliest_start', 0):
-                            print("  • [ADVERTENCIA] El break comienza antes de la hora permitida")
-                        elif scheduled_start > brk.get('latest_start', float('inf')):
-                            print("  • [ADVERTENCIA] El break comienza después de la hora permitida")
             
             # Los nodos ya son objetos con información completa
             nodes = route_nodes
@@ -240,10 +219,7 @@ class JsonSolutionPresenter:
                 "max_volume": max_cumulative_volume
             }
             
-            # Añadir información de breaks si existe
-            if route_breaks:
-                route_info['scheduled_breaks'] = route_breaks
-                
+
             routes.append(route_info)
         
         # Identificar nodos no asignados (solo clientes, no depósitos)
