@@ -143,8 +143,8 @@ async def get_matrix_with_fallback(
                 logger.info("Usando distancia euclidiana (modo offline)")
                 distances = await get_euclidean_distance_matrix(locations)
                 
-                # Para la duración, asumimos una velocidad promedio (ej: 50 km/h)
-                durations = [[d / (50/3.6) for d in row] for row in distances] if 'durations' in metrics else []
+                # Para la duración, asumimos una velocidad promedio de 15 km/h para zonas urbanas
+                durations = [[d / (15/3.6) for d in row] for row in distances] if 'durations' in metrics else []
                 
                 return MatrixResult(
                     distances=distances if 'distances' in metrics else [],

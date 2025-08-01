@@ -74,14 +74,19 @@ def xlsx_to_json(file_path: str) -> Dict[str, Any]:
     vehicles = []
     
     for _, row in df_vehicles.iterrows():
+        # Mapeo de columnas según el formato estándar
+        weight_capacity = safe_convert(row.get('weight_capacity', 0), 0)
+        volume_capacity = safe_convert(row.get('volume_capacity', 0.0), 0.0)
+        
         vehicle = {
             'id': safe_convert(row.get('id', '')),
+            'name': safe_convert(row.get('name', f"Vehículo {len(vehicles) + 1}")),
             'start_location_id': safe_convert(row.get('start_location_id', row.get('start_location', ''))),
             'end_location_id': safe_convert(row.get('end_location_id', row.get('end_location', ''))),
             'start_time': safe_convert(row.get('start_time', 0), 0),
             'end_time': safe_convert(row.get('end_time', 0), 0),
-            'capacity': safe_convert(row.get('capacity', 0), 0),
-            'volume_capacity': safe_convert(row.get('volume_capacity', 0.0), 0.0),
+            'weight_capacity': weight_capacity,
+            'volume_capacity': volume_capacity,
             'skills': eval(safe_convert(row.get('skills', '[]'), '[]')),
             'cost_per_km': safe_convert(row.get('cost_per_km', 0.0), 0.0),
             'cost_per_hour': safe_convert(row.get('cost_per_hour', 0.0), 0.0),
