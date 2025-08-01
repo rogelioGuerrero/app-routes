@@ -12,14 +12,20 @@ import aiohttp
 import os
 from typing import Dict, Any
 
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, UploadFile, File, status
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+import tempfile
+import os
+from pathlib import Path
 
 from vrp_validator import validate_vrp
 from vrp_converter import JsonToVrpDataConverter
 from vrp_solver import VRPSolver
 from solution_presenter import JsonSolutionPresenter
+from xlsx_to_json import xlsx_to_json
 
 # ===== CONFIGURACIÓN =====
 # Cargar variables de entorno
@@ -69,7 +75,7 @@ class SuppressOutput:
 # Inicializar la aplicación FastAPI
 app = FastAPI(
     title="API de Optimización de Rutas VRP",
-    description="API para resolver problemas de enrutamiento de vehículos con múltiples restricciones",
+    description="API para resolver problemas de enrutamiento de vehículos con múltiples restricciones. Incluye soporte para carga de archivos XLSX.",
     version="1.0.0"
 )
 
@@ -91,6 +97,76 @@ async def convert_scenario(scenario: Dict[str, Any]) -> tuple[Dict[str, Any], bo
         converter = JsonToVrpDataConverter(scenario, session)
         vrp_data, used_cache = await converter.convert()
     return vrp_data, used_cache
+
+@app.post("/optimize/upload", status_code=status.HTTP_201_CREATED)
+async def optimize_vrp_upload(file: UploadFile = File(...)):
+    """
+    Endpoint para optimizar rutas VRP a partir de un archivo XLSX.
+    
+    Args:
+        file: Archivo XLSX con los datos del problema VRP.
+        
+    Returns:
+        JSON con la solución del problema o mensaje de error.
+        
+    Example:
+        POST /optimize/upload
+        Body: form-data con archivo XLSX
+    """
+    # Validar extensión del archivo
+    if not file.filename.lower().endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se permiten archivos Excel (.xlsx, .xls)"
+        )
+    
+    # Crear archivo temporal
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as temp_file:
+        try:
+            # Guardar archivo subido
+            content = await file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error al procesar el archivo: {str(e)}"
+            )
+    
+    try:
+        # Convertir XLSX a JSON
+        request_data = xlsx_to_json(temp_file_path)
+        
+        # Validar datos
+        validate_vrp(request_data)
+        
+        # Convertir al formato del solver
+        async with aiohttp.ClientSession() as session:
+            converter = JsonToVrpDataConverter(request_data, session)
+            vrp_data, _ = await converter.convert()
+        
+        # Resolver el problema
+        solver = VRPSolver(vrp_data)
+        solution = solver.solve()
+        
+        # Formatear la solución
+        presenter = JsonSolutionPresenter()
+        result = presenter.present(solution, request_data)
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error al procesar la solicitud: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Error al procesar el archivo: {str(e)}"
+        )
+    finally:
+        # Limpiar archivo temporal
+        try:
+            os.unlink(temp_file_path)
+        except Exception as e:
+            logger.warning(f"No se pudo eliminar el archivo temporal {temp_file_path}: {str(e)}")
 
 @app.post("/optimize")
 async def optimize_vrp(request_data: Dict[str, Any] = Body(...)):
