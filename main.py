@@ -128,43 +128,82 @@ async def optimize_vrp_upload(file: UploadFile = File(...)):
             temp_file.write(content)
             temp_file_path = temp_file.name
         except Exception as e:
+            logger.exception("Error al guardar archivo temporal")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Error al procesar el archivo: {str(e)}"
             )
     
     try:
-        # Convertir XLSX a JSON
+        logger.info(f"Procesando archivo: {file.filename}")
+        
+        # 1. Convertir XLSX a JSON
         request_data = xlsx_to_json(temp_file_path)
         
-        # Validar datos
-        validate_vrp(request_data)
+        # 2. Validar los datos (igual que en el endpoint /optimize)
+        logger.info("Validando datos de entrada...")
+        validation_result = validate_vrp(request_data)
         
-        # Convertir al formato del solver
-        async with aiohttp.ClientSession() as session:
-            converter = JsonToVrpDataConverter(request_data, session)
-            vrp_data, _ = await converter.convert()
+        if validation_result.get('errors'):
+            logger.warning(f"Errores de validación: {validation_result['errors']}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "status": "error",
+                    "message": "Error en los datos de entrada",
+                    "errors": validation_result.get('errors', []),
+                    "warnings": validation_result.get('warnings', [])
+                }
+            )
         
-        # Resolver el problema
-        solver = VRPSolver(vrp_data)
+        # 3. Loggear advertencias si las hay
+        if warnings := validation_result.get('warnings'):
+            logger.warning(f"Advertencias de validación: {warnings}")
+        
+        # 4. Convertir al formato del solver usando los datos validados
+        logger.info("Convirtiendo datos al formato del solver...")
+        vrp_data, used_cache = await convert_scenario(validation_result['cleaned_data'])
+        
+        # 5. Resolver el VRP
+        logger.info("Iniciando optimización...")
+        solver = VRPSolver(
+            vrp_data=vrp_data,
+            distance_matrix=vrp_data.get('distance_matrix', []),
+            time_matrix=vrp_data.get('time_matrix', [])
+        )
         solution = solver.solve()
         
-        # Formatear la solución
-        presenter = JsonSolutionPresenter()
-        result = presenter.present(solution, request_data)
+        # 6. Procesar y devolver la solución
+        logger.info("Procesando solución...")
+        result = JsonSolutionPresenter.present(solution, vrp_data)
+        result.update({
+            'used_cache': used_cache,
+            'excluded_nodes': validation_result.get('excluded_nodes', [])
+        })
         
+        logger.info("Optimización completada exitosamente")
         return result
         
+    except HTTPException:
+        # Re-lanzar excepciones HTTP existentes
+        raise
+        
     except Exception as e:
-        logger.error(f"Error al procesar la solicitud: {str(e)}", exc_info=True)
+        logger.exception("Error en la optimización")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Error al procesar el archivo: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "status": "error",
+                "message": "Error interno del servidor durante la optimización",
+                "details": str(e)
+            }
         )
+        
     finally:
         # Limpiar archivo temporal
         try:
             os.unlink(temp_file_path)
+            logger.debug(f"Archivo temporal eliminado: {temp_file_path}")
         except Exception as e:
             logger.warning(f"No se pudo eliminar el archivo temporal {temp_file_path}: {str(e)}")
 
