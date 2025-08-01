@@ -45,6 +45,18 @@ class JsonToVrpDataConverter:
     # ---------------------------------------------------------------------
     # Matrices distancia / duración
     # ---------------------------------------------------------------------
+    def _apply_congestion_factor(self, time_matrix: List[List[int]]) -> List[List[int]]:
+        """Aplica el factor de congestión a la matriz de tiempo.
+        
+        Si no se especifica en el escenario, usa 1.5 por defecto.
+        """
+        if not time_matrix:
+            return []
+            
+        factor = float(self.scenario.get('congestion_factor', 1.5))
+        logger.info(f"Aplicando factor de congestión: {factor}x")
+        return [[int(t * factor) for t in row] for row in time_matrix]
+        
     async def _calculate_matrices(self) -> Tuple[List[List[int]], List[List[int]]]:
         """Devuelve (distance_matrix, time_matrix) ambas en enteros (m, s)."""
         if not self.locations:
@@ -167,6 +179,11 @@ class JsonToVrpDataConverter:
             if cache_key is not None and not provider_cache_hit:
                 # Solo guardamos si no venía ya de caché para evitar doble conteo
                 _MATRIX_CACHE[cache_key] = (distance_matrix, time_matrix)
+            
+            # Aplicar factor de congestión a la matriz de tiempo
+            time_matrix = self._apply_congestion_factor(time_matrix)
+            
+            # Si todo salió bien, devolvemos las matrices
             return distance_matrix, time_matrix
             
         except Exception as e:
