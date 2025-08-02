@@ -81,8 +81,18 @@ class VRPSolver:
         self._create_routing_model()
         
     def _validate_input_data(self):
-        """Método vacío ya que las validaciones se realizan en vrp_validator.py"""
-        pass
+        """Valida los datos de entrada, incluyendo prioridades y días de la semana."""
+        self._validate_weekdays()
+        
+    def _validate_weekdays(self):
+        """Valida que las ubicaciones solo se visiten en días permitidos."""
+        for loc in self.locations:
+            if 'allowed_weekdays' in loc and loc['allowed_weekdays']:
+                weekday = loc.get('date', 'mon').lower()  # 'mon' por defecto
+                allowed_days = [d.lower() for d in loc['allowed_weekdays']]
+                if weekday not in allowed_days:
+                    logger.warning(f"Ubicación {loc.get('id')} no se puede visitar el día {weekday}")
+                    # No fallamos, solo registramos la advertencia
         
     def _create_routing_model(self):
         """Crea el manager y modelo de routing de OR-Tools."""
@@ -305,6 +315,46 @@ class VRPSolver:
         
         logger.info("Restricciones de habilidades añadidas")
         
+    def _add_priority_penalties(self):
+        """Añade penalizaciones según la prioridad de las ubicaciones."""
+        if not any('priority' in loc for loc in self.locations):
+            return
+            
+        logger.info("Aplicando penalizaciones por prioridad")
+        
+        # Valores de penalización (mayor = más prioridad)
+        PRIORITY_PENALTIES = {
+            'H': 1000000,  # Alta prioridad
+            'M': 100000,   # Media prioridad
+            'L': 10000,    # Baja prioridad
+            '': 1        # Sin prioridad (mínima)
+        }
+        
+        for node_idx, location in enumerate(self.locations):
+            if 'priority' not in location:
+                continue
+                
+            priority = str(location.get('priority', '')).upper()
+            penalty = PRIORITY_PENALTIES.get(priority, 1)
+            
+            # Solo aplicar a ubicaciones que no son depósitos
+            if not self._is_depot(node_idx):
+                index = self.manager.NodeToIndex(node_idx)
+                self.routing.AddDisjunction([index], penalty)
+                logger.debug(f"Prioridad {priority} para ubicación {location.get('id')} - Penalización: {penalty}")
+    
+    def _is_depot(self, node_idx: int) -> bool:
+        """Verifica si un nodo es un depósito (inicio/fin de ruta)."""
+        for vehicle in self.vehicles:
+            start_idx = next((i for i, loc in enumerate(self.locations) 
+                           if loc.get('id') == vehicle.get('start_location_id')), None)
+            end_idx = next((i for i, loc in enumerate(self.locations) 
+                          if loc.get('id') == vehicle.get('end_location_id')), None)
+            
+            if node_idx in (start_idx, end_idx):
+                return True
+        return False
+
     def _add_pickup_delivery_constraints(self):
         """Añade restricciones de pickup & delivery asegurando mismo vehículo y orden correcto.
         Soporta pares en formato [idx_pickup, idx_delivery] o {'pickup': id/idx, 'delivery': id/idx}."""
@@ -372,6 +422,7 @@ class VRPSolver:
         self._add_capacity_constraints()
         self._add_skill_constraints()
         self._add_pickup_delivery_constraints()
+        self._add_priority_penalties()  # Añadir penalizaciones por prioridad
         
         # Configurar parámetros de búsqueda
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
