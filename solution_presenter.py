@@ -55,6 +55,32 @@ class JsonSolutionPresenter:
         locations = data.get('locations', [])
         vehicles = data.get('vehicles', [])
         pickups_deliveries = data.get('pickups_deliveries', [])
+        # Normalizar pares P&D a tuplas de IDs de ubicación (pickup_id, delivery_id)
+        def _to_loc_id(x):
+            if isinstance(x, dict):
+                return x.get('id')
+            if isinstance(x, str):
+                return x
+            if isinstance(x, int):
+                if 0 <= x < len(locations):
+                    return locations[x].get('id')
+                return None
+            return None
+        pd_pairs = []  # lista de tuplas (pickup_id, delivery_id)
+        for pd in pickups_deliveries:
+            if isinstance(pd, dict):
+                p = pd.get('pickup')
+                d = pd.get('delivery')
+                p_id = _to_loc_id(p)
+                d_id = _to_loc_id(d)
+                if p_id and d_id:
+                    pd_pairs.append((p_id, d_id))
+            elif isinstance(pd, (list, tuple)) and len(pd) == 2:
+                p_id = _to_loc_id(pd[0])
+                d_id = _to_loc_id(pd[1])
+                if p_id and d_id:
+                    pd_pairs.append((p_id, d_id))
+            # otros formatos: ignorar silenciosamente
         
         print(f"[DEBUG] Presenter - Vehículos disponibles: {len(vehicles)}")
         for i, v in enumerate(vehicles):
@@ -95,13 +121,8 @@ class JsonSolutionPresenter:
                 if loc_id and loc_id not in ['depot', 'deposit']:
                     node_to_vehiclepos[loc_id] = (vehicle_id, i, pos)
                     assigned_nodes.add(loc_id)
-        # Validar cada par pickup-delivery
-        for pd in pickups_deliveries:
-            pickup_id = pd.get('pickup')
-            delivery_id = pd.get('delivery')
-            if not pickup_id or not delivery_id:
-                warnings.append(f"Par pickup-delivery inválido: {pd}")
-                continue
+        # Validar cada par pickup-delivery (ya normalizado a IDs)
+        for (pickup_id, delivery_id) in pd_pairs:
             pickup_info = node_to_vehiclepos.get(pickup_id)
             delivery_info = node_to_vehiclepos.get(delivery_id)
             if not pickup_info or not delivery_info:
@@ -225,6 +246,8 @@ class JsonSolutionPresenter:
         
         # Identificar nodos no asignados (solo clientes, no depósitos)
         unassigned_nodes = []
+        # Preconstruir conjunto de IDs presentes en pares P&D para el filtro
+        pd_ids = set([pid for pair in pd_pairs for pid in pair])
         for loc in locations:
             loc_id = loc.get('id')
             loc_type = loc.get('type', '').lower()
@@ -234,10 +257,7 @@ class JsonSolutionPresenter:
                 continue
                 
             # Solo considerar nodos que no estén ya asignados
-            if (loc_id not in assigned_nodes and
-                not any(pd.get('pickup') == loc_id or 
-                       pd.get('delivery') == loc_id 
-                       for pd in pickups_deliveries)):
+            if (loc_id not in assigned_nodes and loc_id not in pd_ids):
                 unassigned_nodes.append({
                     'id': loc_id,
                     'name': loc.get('name', loc_id),

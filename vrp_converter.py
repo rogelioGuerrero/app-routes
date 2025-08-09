@@ -423,7 +423,8 @@ class JsonToVrpDataConverter:
                 # Caso 1: Par en formato diccionario {pickup: X, delivery: Y}
                 if isinstance(pair, dict) and 'pickup' in pair and 'delivery' in pair:
                     p, d = pair.get('pickup'), pair.get('delivery')
-                    logger.debug(f"Procesando par pickup-delivery (diccionario): {p.get('id', 'sin-id')} -> {d.get('id', 'sin-id')}")
+                    # Nota: 'p' y 'd' pueden ser IDs (str) o índices (int). No asumir dict con 'id'.
+                    logger.debug(f"Procesando par pickup-delivery (diccionario): {p} -> {d}")
                 
                 # Caso 2: Par en formato lista/tupla [X, Y]
                 elif isinstance(pair, (list, tuple)) and len(pair) == 2:
