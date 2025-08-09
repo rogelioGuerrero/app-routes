@@ -73,26 +73,11 @@ class VRPSolver:
         self.optimization_profile = self.DEFAULT_OPTIMIZATION_PROFILE.copy()
         if 'optimization_profile' in vrp_data:
             self.optimization_profile.update(vrp_data['optimization_profile'])
-        
-        # Validar datos básicos
-        self._validate_input_data()
-        
+    
         # Crear manager y routing model
         self._create_routing_model()
         
-    def _validate_input_data(self):
-        """Valida los datos de entrada, incluyendo prioridades y días de la semana."""
-        self._validate_weekdays()
-        
-    def _validate_weekdays(self):
-        """Valida que las ubicaciones solo se visiten en días permitidos."""
-        for loc in self.locations:
-            if 'allowed_weekdays' in loc and loc['allowed_weekdays']:
-                weekday = loc.get('date', 'mon').lower()  # 'mon' por defecto
-                allowed_days = [d.lower() for d in loc['allowed_weekdays']]
-                if weekday not in allowed_days:
-                    logger.warning(f"Ubicación {loc.get('id')} no se puede visitar el día {weekday}")
-                    # No fallamos, solo registramos la advertencia
+    
         
     def _create_routing_model(self):
         """Crea el manager y modelo de routing de OR-Tools."""
@@ -523,7 +508,7 @@ class VRPSolver:
                     'coords': location.get('coords'),
                     'arrival_time': self.solution.Value(time_var),
                     'weight_load': self.solution.Value(weight_var),
-                    'volume_load': self.solution.Value(volume_var) / 100.0,  # Convertir de vuelta
+                    'volume_load': self.solution.Value(volume_var) / self.M3_TO_CM3,  # cm³ -> m³
                     'service_time': location.get('service_time', 0)
                 }
                 
@@ -561,7 +546,7 @@ class VRPSolver:
                 'coords': final_location.get('coords'),
                 'arrival_time': self.solution.Value(time_var),
                 'weight_load': self.solution.Value(weight_var),
-                'volume_load': self.solution.Value(volume_var) / 100.0,
+                'volume_load': self.solution.Value(volume_var) / self.M3_TO_CM3,
                 'service_time': final_location.get('service_time', 0)
             }
             
@@ -588,3 +573,4 @@ class VRPSolver:
                    f"distancia total: {solution_data['total_distance']}, ")
                    
         return solution_data
+

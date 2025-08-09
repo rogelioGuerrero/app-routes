@@ -272,6 +272,27 @@ class JsonSolutionPresenter:
             s = int(seconds % 60)
             return f"{h:02d}:{m:02d}:{s:02d}"
 
+        # Utilidades de redondeo a cifras significativas (presentación)
+        def _round_sig(value, sig=2):
+            if not isinstance(value, (int, float)):
+                return value
+            if value == 0:
+                return 0
+            import math
+            return round(value, sig - int(math.floor(math.log10(abs(value)))) - 1)
+
+        def _round_weight(value):
+            # Mantener enteros tal cual; si es float y entero, castear
+            if isinstance(value, int):
+                return value
+            if isinstance(value, float) and value.is_integer():
+                return int(value)
+            rv = _round_sig(value, 2)
+            return int(rv) if isinstance(rv, float) and rv.is_integer() else rv
+
+        def _round_volume(value):
+            return _round_sig(float(value), 2)
+
         # Procesar rutas para el nuevo formato
         formatted_routes = []
         total_duration = 0
@@ -319,6 +340,28 @@ class JsonSolutionPresenter:
                 total_stops += 1
                 route_distance = max(route_distance, node.get('distance', 0))
             
+            # Ajuste de carga para depósito final: mostrar load_before (no sumar demanda del depósito)
+            end_location_id = None
+            for v in vehicles:
+                if v.get('id') == route.get('vehicle_id', ''):
+                    end_location_id = v.get('end_location_id')
+                    break
+            if stops and end_location_id and stops[-1]['location']['id'] == end_location_id:
+                depot_weight = 0
+                depot_volume = 0
+                for loc in locations:
+                    if loc.get('id') == end_location_id:
+                        depot_weight = loc.get('weight_demand', 0)
+                        depot_volume = loc.get('volume_demand', 0)
+                        break
+                stops[-1]['load']['weight'] = stops[-1]['load']['weight'] - depot_weight
+                stops[-1]['load']['volume'] = stops[-1]['load']['volume'] - depot_volume
+            
+            # Redondear cargas a 2 cifras significativas
+            for s in stops:
+                s['load']['weight'] = _round_weight(s['load']['weight'])
+                s['load']['volume'] = _round_volume(s['load']['volume'])
+            
             # Calcular duración y distancia total de la ruta
             route_duration = 0
             route_total_distance = 0
@@ -352,7 +395,7 @@ class JsonSolutionPresenter:
                 
                 # Si no se pudo calcular la distancia, usar el valor del nodo
                 if route_total_distance <= 0:
-                    route_total_distance = max(node.get('distance', 0) for node in route_nodes if 'distance' in node)
+                    route_total_distance = max((node.get('distance', 0) for node in route_nodes if 'distance' in node), default=0)
             
             # Calcular métricas de capacidad
             max_weight = max((stop['load']['weight'] for stop in stops), default=0)
@@ -366,7 +409,7 @@ class JsonSolutionPresenter:
                 },
                 "stops": stops,
                 "metrics": {
-                    "total_distance": route_total_distance,  # en metros
+                    "total_distance": int(round(route_total_distance)),  # en metros (entero)
                     "total_duration": route_duration,        # en segundos
                     "total_stops": len(stops),
                     "max_weight": max_weight,
