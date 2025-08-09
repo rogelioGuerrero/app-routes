@@ -211,6 +211,7 @@ class JsonSolutionPresenter:
                 "vehicle_id": vehicle_id,
                 "vehicle_name": vehicle.get('name', f"Vehículo {i}"),
                 "route": nodes,
+                "breaks": route_data.get('breaks', []),
                 "node_names": node_names,
                 "total_distance": route_data.get('total_distance', 0),
                 "weight_capacity": weight_capacity,
@@ -303,6 +304,7 @@ class JsonSolutionPresenter:
             current_weight = 0
             current_volume = 0
             route_distance = 0
+            route_breaks = []
             
             for node in route.get('route', []):
                 # Calcular tiempo de salida (llegada + tiempo de servicio)
@@ -339,6 +341,19 @@ class JsonSolutionPresenter:
                 # Acumular estadísticas
                 total_stops += 1
                 route_distance = max(route_distance, node.get('distance', 0))
+
+            # Formatear breaks (si existen)
+            for b in route.get('breaks', []) or []:
+                try:
+                    route_breaks.append({
+                        "name": b.get('name', ''),
+                        "start": format_seconds(b.get('start_time', 0)),
+                        "end": format_seconds(b.get('end_time', 0)),
+                        "duration": int(b.get('duration', 0))
+                    })
+                except Exception:
+                    # En caso de valores no convertibles, omitir ese break
+                    continue
             
             # Ajuste de carga para depósito final: mostrar load_before (no sumar demanda del depósito)
             end_location_id = None
@@ -408,6 +423,7 @@ class JsonSolutionPresenter:
                     "name": route.get('vehicle_name', '')
                 },
                 "stops": stops,
+                "breaks": route_breaks,
                 "metrics": {
                     "total_distance": int(round(route_total_distance)),  # en metros (entero)
                     "total_duration": route_duration,        # en segundos

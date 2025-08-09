@@ -3,7 +3,7 @@ VRP Solver usando OR-Tools con soporte completo para todas las restricciones:
 - Ventanas de tiempo (time windows)
 - Capacidad de peso y volumen
 - Habilidades requeridas (skills)
-- No se manejan breaks en esta versión
+- Breaks por vehículo (intervalos de descanso)
 - Pickup and delivery
 - Múltiples depósitos
 - Penalizaciones por nodos no visitados
@@ -61,6 +61,8 @@ class VRPSolver:
         self.locations = self.data.get('locations', [])
         self.vehicles = self.data.get('vehicles', [])
         self.pickups_deliveries = self.data.get('pickups_deliveries', [])
+        # Contenedor para intervals de breaks por vehículo (relleno en _add_break_constraints)
+        self._break_intervals_by_vehicle = {}
         
         # Inicializar matrices con las proporcionadas o listas vacías
         self.distance_matrix = distance_matrix or []
@@ -219,6 +221,128 @@ class VRPSolver:
         # Configurar costo de span global para optimizar el tiempo total
         time_dimension.SetGlobalSpanCostCoefficient(100)
         logger.info("Restricciones de ventana de tiempo añadidas")
+
+    def _add_break_constraints(self):
+        """Añade breaks por vehículo usando la dimensión de tiempo (si están configurados).
+        
+        Espera que cada vehículo (en self.vehicles) pueda incluir un campo opcional
+        'breaks': List[{
+            'duration': int (en segundos),
+            'time_windows': List[[start:int, end:int]]  # ventanas permitidas en segundos
+        }]
+        
+        Si no se especifican breaks, no se altera el comportamiento actual.
+        """
+        try:
+            time_dimension = self.routing.GetDimensionOrDie('Time')
+        except Exception:
+            # Si por alguna razón no existe la dimensión de tiempo, no aplicar breaks
+            logger.warning("Dimensión de tiempo no disponible; no se aplican breaks")
+            return
+
+        solver = self.routing.solver()
+        # Reset local storage de breaks programables
+        self._break_intervals_by_vehicle = {}
+
+        total_breaks = 0
+        for vehicle_id, vehicle in enumerate(self.vehicles):
+            breaks_cfg = vehicle.get('breaks', []) or []
+            if not breaks_cfg:
+                continue
+
+            intervals = []
+            intervals_info = []  # Para exportar luego (nombre, etc.)
+            # Para forzar que el horizonte de la ruta cubra al menos el final del primer break posible
+            min_required_end = None
+            for b_idx, b in enumerate(breaks_cfg):
+                try:
+                    duration = int(b.get('duration', 0))
+                except Exception:
+                    duration = 0
+
+                if duration <= 0:
+                    logger.warning(f"Break inválido (duración <= 0) en vehículo {vehicle_id}: {b}")
+                    continue
+
+                windows = b.get('time_windows') or []
+                if not isinstance(windows, list) or not windows:
+                    logger.warning(f"Break sin ventanas de tiempo en vehículo {vehicle_id}: {b}")
+                    continue
+
+                # Seleccionar solo la primera ventana válida para evitar crear múltiples breaks
+                first_valid = None
+                invalid_windows = 0
+                for win in windows:
+                    if not isinstance(win, (list, tuple)) or len(win) != 2:
+                        invalid_windows += 1
+                        continue
+                    try:
+                        window_start = int(win[0])
+                        window_end = int(win[1])
+                    except Exception:
+                        invalid_windows += 1
+                        continue
+                    # start puede variar entre [window_start, window_end - duration]
+                    start_min = window_start
+                    start_max = window_end - duration
+                    if start_max < start_min:
+                        invalid_windows += 1
+                        continue
+                    first_valid = (start_min, start_max)
+                    break
+
+                if first_valid is None:
+                    logger.warning(
+                        f"Ninguna ventana válida para break (duración {duration}s) en vehículo {vehicle_id}: {windows}"
+                    )
+                    continue
+
+                if len(windows) - invalid_windows > 1:
+                    logger.warning(
+                        f"Se proporcionaron múltiples ventanas válidas para un solo break; usando solo la primera en vehículo {vehicle_id}"
+                    )
+
+                name = f"Break_v{vehicle_id}_{b_idx}"
+                try:
+                    # Break obligatorio (no opcional): último booleano = False
+                    interval = solver.FixedDurationIntervalVar(first_valid[0], first_valid[1], duration, False, name)
+                    intervals.append(interval)
+                    intervals_info.append({'name': name})
+                    # Mantener el final más temprano posible para exigir horizonte adecuado
+                    candidate_end = first_valid[0] + duration
+                    if min_required_end is None or candidate_end < min_required_end:
+                        min_required_end = candidate_end
+                except Exception as e:
+                    logger.error(f"No se pudo crear intervalo de break {name}: {e}")
+                    continue
+
+            if intervals:
+                try:
+                    # OR-Tools API actual requiere 'node_visit_transits': servicio por nodo para este vehículo
+                    node_visit_transits = [0] * self.routing.Size()
+                    for idx in range(self.routing.Size()):
+                        node = self.manager.IndexToNode(idx)
+                        if 0 <= node < len(self.locations):
+                            node_visit_transits[idx] = int(self.locations[node].get('service_time', 0))
+
+                    time_dimension.SetBreakIntervalsOfVehicle(intervals, vehicle_id, node_visit_transits)
+                    total_breaks += len(intervals)
+                    # Guardar referencia para extracción de solución
+                    self._break_intervals_by_vehicle[vehicle_id] = intervals_info
+                    # Asegurar que el fin de ruta no sea anterior al fin del primer break posible
+                    if min_required_end is not None:
+                        end_index = self.routing.End(vehicle_id)
+                        time_dimension.CumulVar(end_index).SetMin(min_required_end)
+                        logger.debug(
+                            f"Vehículo {vehicle_id}: forzando fin >= {min_required_end} para cubrir break"
+                        )
+                except Exception as e:
+                    logger.error(f"Error al asignar breaks al vehículo {vehicle_id}: {e}")
+
+        if total_breaks:
+            logger.info(f"Breaks configurados: {total_breaks} intervalos en {len(self.vehicles)} vehículos")
+        else:
+            logger.info("Sin breaks configurados (ningún vehículo los definió)")
         
     def _add_capacity_constraints(self):
         """Añade restricciones de capacidad (peso y volumen)."""
@@ -404,6 +528,7 @@ class VRPSolver:
         logger.info("Añadiendo restricciones al modelo...")
         self._add_distance_constraint()
         self._add_time_window_constraints()
+        self._add_break_constraints()
         self._add_capacity_constraints()
         self._add_skill_constraints()
         self._add_pickup_delivery_constraints()
@@ -482,6 +607,7 @@ class VRPSolver:
                 'vehicle_id': self.vehicles[vehicle_id].get('id'),
                 'vehicle_name': self.vehicles[vehicle_id].get('name'),
                 'route': [],
+                'breaks': [],
                 'distance': 0,
                 'time': 0,
                 'load_weight': 0,
@@ -553,6 +679,62 @@ class VRPSolver:
             route_data['route'].append(final_node_data)
             route_data['distance'] = route_distance
             route_data['time'] = self.solution.Value(time_var)
+
+            # Extraer breaks programados para este vehículo
+            try:
+                # En algunas versiones, IntervalVarContainer está en el objeto assignment (self.solution)
+                intervals_container = self.solution.IntervalVarContainer()
+            except Exception:
+                intervals_container = None
+
+            vehicle_breaks = []
+            # Intentar primero vía la dimensión de tiempo
+            try:
+                dim_breaks = self.routing.GetDimensionOrDie('Time').GetBreakIntervalsOfVehicle(vehicle_id)
+            except Exception:
+                dim_breaks = []
+            try:
+                for brk in dim_breaks:
+                    # Estos son IntervalVar
+                    name = brk.Name() if hasattr(brk, 'Name') else getattr(brk.Var(), 'Name', lambda: '')()
+                    performed = self.solution.PerformedValue(brk) if hasattr(self.solution, 'PerformedValue') else getattr(brk, 'PerformedValue', lambda: 1)()
+                    if performed == 1:
+                        # Dependiendo de versión, StartValue/DurationValue pueden estar en assignment o en el objeto
+                        start = self.solution.StartValue(brk) if hasattr(self.solution, 'StartValue') else brk.StartValue()
+                        dur = self.solution.DurationValue(brk) if hasattr(self.solution, 'DurationValue') else brk.DurationValue()
+                        vehicle_breaks.append({
+                            'name': name,
+                            'start_time': start,
+                            'end_time': start + dur,
+                            'duration': dur
+                        })
+            except Exception as e:
+                logger.debug(f"Extracción de breaks por dimensión falló para vehículo {vehicle_id}: {e}")
+
+            # Fallback: revisar IntervalVarContainer si está disponible
+            if not vehicle_breaks and intervals_container is not None:
+                try:
+                    expected_names = set(
+                        info.get('name') for info in self._break_intervals_by_vehicle.get(vehicle_id, [])
+                    ) if hasattr(self, '_break_intervals_by_vehicle') else set()
+                    for i in range(intervals_container.Size()):
+                        brk = intervals_container.Element(i)
+                        name = brk.Var().Name()
+                        if (expected_names and name in expected_names) or name.startswith(f"Break_v{vehicle_id}_"):
+                            if brk.PerformedValue() == 1:
+                                start = brk.StartValue()
+                                dur = brk.DurationValue()
+                                vehicle_breaks.append({
+                                    'name': name,
+                                    'start_time': start,
+                                    'end_time': start + dur,
+                                    'duration': dur
+                                })
+                except Exception as e:
+                    logger.warning(f"No se pudieron extraer breaks del vehículo {vehicle_id}: {e}")
+
+            if vehicle_breaks:
+                route_data['breaks'] = vehicle_breaks
             
             # Solo agregar la ruta si tiene más de un nodo (origen y destino)
             if len(route_data['route']) > 1:

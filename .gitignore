@@ -217,3 +217,5 @@ tmp/
 *.xlsx
 *.xls
 *.json
+*.json.bak
+*.py.bak
