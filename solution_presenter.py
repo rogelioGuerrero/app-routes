@@ -437,13 +437,12 @@ class JsonSolutionPresenter:
             max_volume = max((stop['load']['volume'] for stop in stops), default=0)
             
             # Agregar ruta formateada
-            formatted_routes.append({
+            formatted_route = {
                 "vehicle": {
                     "id": route.get('vehicle_id', ''),
                     "name": route.get('vehicle_name', '')
                 },
                 "stops": stops,
-                "breaks": route_breaks,
                 "metrics": {
                     "total_distance": int(round(route_total_distance)),  # en metros (entero)
                     "total_duration": route_duration,        # en segundos
@@ -451,7 +450,13 @@ class JsonSolutionPresenter:
                     "max_weight": max_weight,
                     "max_volume": max_volume
                 }
-                })
+            }
+            
+            # Solo agregar breaks si hay alguno
+            if route_breaks:
+                formatted_route["breaks"] = route_breaks
+                
+            formatted_routes.append(formatted_route)
         
         # Respuesta final mejorada
         return {

@@ -88,6 +88,7 @@ def xlsx_to_json(file_path: str) -> Dict[str, Any]:
             'weight_capacity': weight_capacity,
             'volume_capacity': volume_capacity,
             'skills': eval(safe_convert(row.get('skills', '[]'), '[]')),
+            'breaks': eval(safe_convert(row.get('breaks', '[]'), '[]')),  # Formato: [{"duration": segundos, "time_windows": [[inicio1, fin1], [inicio2, fin2]]}]
             'cost_per_km': safe_convert(row.get('cost_per_km', 0.0), 0.0),
             'cost_per_hour': safe_convert(row.get('cost_per_hour', 0.0), 0.0),
             'fixed_cost': safe_convert(row.get('fixed_cost', 0.0), 0.0)
