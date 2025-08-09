@@ -213,5 +213,7 @@ marimo/_lsp/
 __marimo__/
 tmp/
 
-# Archivos JSON en la raíz
-/*.json
+# Archivos Excel y JSON
+*.xlsx
+*.xls
+*.json
