@@ -3,6 +3,7 @@ Módulo para convertir archivos XLSX al formato JSON esperado por el optimizador
 """
 import pandas as pd
 import json
+import re
 from typing import Dict, Any, List, Optional
 
 def safe_convert(value, default=None):
@@ -14,6 +15,107 @@ def safe_convert(value, default=None):
     if hasattr(value, 'item'):  # Para numpy types
         return value.item()
     return value
+
+# --- Utilidades de parsing amigables para el usuario ---
+def _parse_time_to_seconds(val: Any) -> Optional[int]:
+    """Convierte una hora a segundos desde medianoche.
+
+    Acepta:
+    - Cadenas 'HH:MM' o 'HH:MM:SS'
+    - Números/strings numéricos como segundos (p.ej. 39600)
+    """
+    if val is None:
+        return None
+    # Si viene como número (o string numérico), interpretarlo como segundos directos
+    if isinstance(val, (int, float)):
+        return int(val)
+    s = str(val).strip()
+    if not s:
+        return None
+    # Si es numérico puro, tratar como segundos
+    if re.fullmatch(r"\d+", s):
+        return int(s)
+    # Formatos con ':' -> HH:MM(:SS)?
+    if ":" in s:
+        parts = s.split(":")
+        try:
+            h = int(parts[0])
+            m = int(parts[1]) if len(parts) > 1 else 0
+            sec = int(parts[2]) if len(parts) > 2 else 0
+            return h * 3600 + m * 60 + sec
+        except Exception:
+            return None
+    return None
+
+def _parse_break_windows(cell_val: Any) -> List[List[int]]:
+    """Parsea ventanas de tiempo de descanso a [[ini, fin], ...] (segundos).
+
+    Acepta:
+    - Lista ya en segundos: [[39600,50400], ...]
+    - Texto JSON-like de lista: "[[39600,50400],[54000,57600]]"
+    - Texto de rangos legibles: "11:00-14:00; 15:00-16:00" (separador ';' o ',')
+    """
+    if cell_val is None:
+        return []
+    # Si es lista ya estructurada
+    if isinstance(cell_val, list):
+        out: List[List[int]] = []
+        for rng in cell_val:
+            if isinstance(rng, (list, tuple)) and len(rng) == 2:
+                try:
+                    start = int(float(rng[0])) if rng[0] is not None else None
+                    end = int(float(rng[1])) if rng[1] is not None else None
+                    if start is not None and end is not None:
+                        out.append([start, end])
+                except Exception:
+                    continue
+        return out
+    s = str(cell_val).strip()
+    if not s:
+        return []
+    # Si parece lista JSON, eval rápida y recursiva
+    if s.startswith("[") and s.endswith("]"):
+        try:
+            val = eval(s)
+            return _parse_break_windows(val)
+        except Exception:
+            return []
+    # Normalizar separador de rango y múltiplos
+    s = s.replace("–", "-")  # en-dash a guion
+    # Separar por ';' o ',' como múltiplos
+    tokens = re.split(r"[;,]", s)
+    windows: List[List[int]] = []
+    for tok in tokens:
+        tok = tok.strip()
+        if not tok:
+            continue
+        if "-" not in tok:
+            continue
+        start_str, end_str = [p.strip() for p in tok.split("-", 1)]
+        start = _parse_time_to_seconds(start_str)
+        end = _parse_time_to_seconds(end_str)
+        if start is not None and end is not None:
+            windows.append([start, end])
+    return windows
+
+def _parse_minutes_to_seconds(val: Any) -> Optional[int]:
+    """Interpreta el valor como minutos y retorna segundos.
+
+    Soporta números y strings numéricos. Admite separador decimal con coma o punto.
+    """
+    if val is None:
+        return None
+    if isinstance(val, (int, float)):
+        return int(round(float(val) * 60))
+    s = str(val).strip()
+    if not s:
+        return None
+    # Reemplazar coma decimal por punto
+    s = s.replace(",", ".")
+    try:
+        return int(round(float(s) * 60))
+    except Exception:
+        return None
 
 def xlsx_to_json(file_path: str) -> Dict[str, Any]:
     """
@@ -78,6 +180,22 @@ def xlsx_to_json(file_path: str) -> Dict[str, Any]:
         weight_capacity = safe_convert(row.get('weight_capacity', 0), 0)
         volume_capacity = safe_convert(row.get('volume_capacity', 0.0), 0.0)
         
+        # Construcción de 'breaks' exclusivamente desde dos columnas del XLSX (amigables):
+        #  - 'break_duration' o 'breaks_duration'  (EN MINUTOS, se convierte a segundos)
+        #  - 'break_windows'  o 'breaks_time_windows' (rango(s) horario(s) legibles p.ej. "11:00-14:00; 15:00-16:00")
+        # Nota: Ya NO se usa ninguna columna 'breaks' en el XLSX.
+        breaks_value = []
+        duration_cell = safe_convert(row.get('break_duration', row.get('breaks_duration')))
+        tw_cell = safe_convert(row.get('break_windows', row.get('breaks_time_windows')))
+        if duration_cell not in (None, '') and tw_cell not in (None, '', '[]'):
+            duration_seconds = _parse_minutes_to_seconds(duration_cell)
+            time_windows = _parse_break_windows(tw_cell)
+            if duration_seconds is not None and time_windows:
+                breaks_value = [{
+                    'duration': duration_seconds,
+                    'time_windows': time_windows
+                }]
+        
         vehicle = {
             'id': safe_convert(row.get('id', '')),
             'name': safe_convert(row.get('name', f"Vehículo {len(vehicles) + 1}")),
@@ -88,7 +206,7 @@ def xlsx_to_json(file_path: str) -> Dict[str, Any]:
             'weight_capacity': weight_capacity,
             'volume_capacity': volume_capacity,
             'skills': eval(safe_convert(row.get('skills', '[]'), '[]')),
-            'breaks': eval(safe_convert(row.get('breaks', '[]'), '[]')),  # Formato: [{"duration": segundos, "time_windows": [[inicio1, fin1], [inicio2, fin2]]}]
+            'breaks': breaks_value,  # Formato: [{"duration": segundos, "time_windows": [[inicio1, fin1], [inicio2, fin2]]}]
             'cost_per_km': safe_convert(row.get('cost_per_km', 0.0), 0.0),
             'cost_per_hour': safe_convert(row.get('cost_per_hour', 0.0), 0.0),
             'fixed_cost': safe_convert(row.get('fixed_cost', 0.0), 0.0)
