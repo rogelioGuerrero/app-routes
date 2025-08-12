@@ -20,53 +20,39 @@ async def get_euclidean_distance_matrix(
     distance_factor: float = 1.5,
     avg_speed_kmh: float = 15.0,
     **kwargs
-) -> Tuple[List[List[float]], List[List[float]]]:
+) -> List[List[float]]:
     """
-    Calcula las matrices de distancia y tiempo usando distancia euclidiana con factores de corrección.
+    Calcula una matriz de distancias en metros usando fórmula de Haversine con un
+    factor de corrección opcional para aproximar rutas reales.
     
     Args:
         locations: Lista de diccionarios con 'lat' y 'lng'
-        distance_factor: Factor para ajustar la distancia en línea recta a distancia real (default: 1.3)
-        avg_speed_kmh: Velocidad promedio en km/h para cálculo de tiempos (default: 25.0)
+        distance_factor: Factor para ajustar la distancia en línea recta a distancia real (default: 1.5)
+        avg_speed_kmh: (No usado aquí) Se mantiene por compatibilidad.
         **kwargs: Argumentos adicionales para compatibilidad
         
     Returns:
-        Tupla con (matriz_distancias, matriz_tiempos) donde:
-        - matriz_distancias: distancias en metros con factor de corrección aplicado
-        - matriz_tiempos: tiempos estimados en segundos
-        
-    Nota:
-        - Usa la fórmula de Haversine para distancias geodésicas
-        - Aplica un factor de corrección a las distancias para aproximarse a rutas reales
-        - Calcula tiempos basados en la velocidad promedio proporcionada
+        Matriz de distancias (metros)
     """
     n = len(locations)
     distances = [[0.0] * n for _ in range(n)]
-    times = [[0.0] * n for _ in range(n)]
-    
-    # Convertir velocidad a m/s para consistencia con distancias en metros
-    speed_ms = (avg_speed_kmh * 1000) / 3600  # km/h a m/s
     
     for i in range(n):
         for j in range(n):
             if i == j:
                 distances[i][j] = 0.0
-            else:
-                # Fórmula de Haversine para distancia entre dos puntos en la Tierra
-                lat1, lng1 = math.radians(locations[i]['lat']), math.radians(locations[i]['lng'])
-                lat2, lng2 = math.radians(locations[j]['lat']), math.radians(locations[j]['lng'])
-                
-                # Diferencia de latitud y longitud
-                dlat = lat2 - lat1
-                dlng = lng2 - lng1
-                
-                # Fórmula de Haversine
-                a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng/2)**2
-                c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-                
-                # Radio de la Tierra en metros (promedio)
-                R = 6371000  # metros
-                distances[i][j] = R * c
+                continue
+            # Haversine
+            lat1 = math.radians(locations[i]['lat'])
+            lng1 = math.radians(locations[i]['lng'])
+            lat2 = math.radians(locations[j]['lat'])
+            lng2 = math.radians(locations[j]['lng'])
+            dlat = lat2 - lat1
+            dlng = lng2 - lng1
+            a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+            R = 6371000  # metros
+            distances[i][j] = (R * c) * float(distance_factor)
     
     return distances
 
@@ -285,49 +271,4 @@ def calculate_euclidean_distance(
     # Aplicar factor de escala si es necesario
     return distance * (scale_factor / 1000)
 
-async def get_euclidean_distance_matrix(locations: List[Dict[str, float]]) -> Tuple[List[List[float]], List[List[float]]]:
-    """
-    Calcula la matriz de distancias euclidianas entre ubicaciones.
-    
-    Args:
-        locations: Lista de ubicaciones con 'lat' y 'lng'
-        
-    Returns:
-        Tupla con matrices de distancias y tiempos en metros
-        
-    Nota:
-        Utiliza la fórmula de Haversine para calcular distancias geodésicas.
-    """
-    from math import radians, sin, cos, sqrt, atan2
-    
-    # Radio de la Tierra en metros
-    R = 6371000
-    
-    n = len(locations)
-    distances = [[0.0] * n for _ in range(n)]
-    times = [[0.0] * n for _ in range(n)]
-    
-    # Calcular distancias y tiempos
-    for i in range(n):
-        for j in range(i, n):  # Incluir la diagonal para tiempos
-            if i == j:
-                distances[i][j] = 0.0
-                times[i][j] = 0.0
-                continue
-                
-            # Calcular distancia en línea recta
-            dist = calculate_euclidean_distance(locations[i], locations[j])
-            
-            # Aplicar factor de corrección a la distancia
-            distance_factor = 1.2  # Factor de corrección para distancias
-            corrected_dist = dist * distance_factor
-            
-            # Calcular tiempo estimado (distancia / velocidad)
-            speed_ms = 50 / 3.6  # Velocidad promedio en m/s
-            time_sec = corrected_dist / speed_ms if speed_ms > 0 else 0
-            a = sin(dlat / 2)**2 + cos(lat1) * cos(lat2) * sin(dlng / 2)**2
-            c = 2 * atan2(sqrt(a), sqrt(1 - a))
-            
-            matrix[i][j] = R * c
-    
-    return matrix
+ 

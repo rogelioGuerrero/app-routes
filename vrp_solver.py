@@ -616,9 +616,11 @@ class VRPSolver:
             
             index = self.routing.Start(vehicle_id)
             route_distance = 0
+            last_non_end_index = None
             logger.info(f"Procesando vehículo {vehicle_id}: start_index={index}")
-            
+             
             while not self.routing.IsEnd(index):
+                last_non_end_index = index
                 node_index = self.manager.IndexToNode(index)
                 location = self.locations[node_index]
                 
@@ -657,6 +659,19 @@ class VRPSolver:
                         # Usar una distancia predeterminada segura (por ejemplo, 0 o un valor pequeño)
                         route_distance += 0
             
+            # Sumar el tramo final (último nodo -> depósito fin)
+            try:
+                if last_non_end_index is not None:
+                    from_node = self.manager.IndexToNode(last_non_end_index)
+                    to_node = self.manager.IndexToNode(index)  # end
+                    if (0 <= from_node < len(self.distance_matrix) and 
+                        0 <= to_node < len(self.distance_matrix[from_node])):
+                        route_distance += self.distance_matrix[from_node][to_node]
+                    else:
+                        logger.warning(f"Índices fuera de rango (final): from_node={from_node}, to_node={to_node}")
+            except Exception as e:
+                logger.warning(f"Error sumando tramo final al depósito: {e}")
+
             # Añadir nodo final
             final_node_index = self.manager.IndexToNode(index)
             final_location = self.locations[final_node_index]

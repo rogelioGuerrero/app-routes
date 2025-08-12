@@ -48,12 +48,12 @@ class JsonToVrpDataConverter:
     def _apply_congestion_factor(self, time_matrix: List[List[int]]) -> List[List[int]]:
         """Aplica el factor de congestión a la matriz de tiempo.
         
-        Si no se especifica en el escenario, usa 1.5 por defecto.
+        Si no se especifica en el escenario, usa 1.2 por defecto.
         """
         if not time_matrix:
             return []
             
-        factor = float(self.scenario.get('congestion_factor', 1.5))
+        factor = float(self.scenario.get('congestion_factor', 1.2))
         logger.info(f"Aplicando factor de congestión: {factor}x")
         return [[int(t * factor) for t in row] for row in time_matrix]
         

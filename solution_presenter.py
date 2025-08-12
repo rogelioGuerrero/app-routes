@@ -81,31 +81,48 @@ class JsonSolutionPresenter:
                 if p_id and d_id:
                     pd_pairs.append((p_id, d_id))
             # otros formatos: ignorar silenciosamente
+        # Conjuntos para rol P&D
+        pickup_ids = {p for (p, _) in pd_pairs}
+        delivery_ids = {d for (_, d) in pd_pairs}
+        pd_ambiguous_ids = pickup_ids & delivery_ids
         
         print(f"[DEBUG] Presenter - Vehículos disponibles: {len(vehicles)}")
         for i, v in enumerate(vehicles):
             print(f"[DEBUG] Vehículo {i}: ID={v.get('id')}, Peso={v.get('weight_capacity')}, Volumen={v.get('volume_capacity')}, Skills={v.get('skills')}")
         
-        # Analizar demandas totales por clientes
+        # Mapa vehículo -> (start_id, end_id) basado exclusivamente en el input
+        vehicle_depots = {v.get('id'): (v.get('start_location_id'), v.get('end_location_id')) for v in vehicles}
+        
+        # Analizar demandas totales por clientes (sin asumir 'type')
         total_weight_demand = 0
         total_volume_demand = 0
         for loc in locations:
-            if loc.get('type') != 'depot':  # No contar los depósitos
-                weight_demand = loc.get('weight_demand', 0)
-                volume_demand = loc.get('volume_demand', 0)
-                # Solo sumar demandas positivas para evitar contar dos veces en pares pickup/delivery
-                if weight_demand > 0:
-                    total_weight_demand += weight_demand
-                if volume_demand > 0:
-                    total_volume_demand += volume_demand
+            loc_id = loc.get('id')
+            # No contar depósitos: usar exclusivamente start/end de los vehículos
+            is_vehicle_depot = any(loc_id in (v.get('start_location_id'), v.get('end_location_id')) for v in vehicles)
+            if is_vehicle_depot:
+                continue
+            weight_demand = loc.get('weight_demand', 0)
+            volume_demand = loc.get('volume_demand', 0)
+            # Solo sumar demandas positivas para evitar contar dos veces en pares pickup/delivery
+            if weight_demand > 0:
+                total_weight_demand += weight_demand
+            if volume_demand > 0:
+                total_volume_demand += volume_demand
         
-        # Identificar nodos no asignados
-        unassigned_nodes = cls._get_unassigned_nodes(raw_solution, locations)
+        # Identificar nodos no asignados: se calcula más abajo usando start/end de vehículos
+        # (se elimina el cálculo preliminar para evitar suposiciones de índices/depósitos)
         
         # Procesar rutas
         routes = []
         warnings = []
         capacity_warnings = []
+        # Advertir si algún nodo aparece como pickup y delivery a la vez
+        if pd_ambiguous_ids:
+            try:
+                warnings.append(f"Nodos con rol P&D ambiguo (pickup y delivery): {sorted(list(pd_ambiguous_ids))}")
+            except Exception:
+                warnings.append("Existen nodos con rol P&D ambiguo (pickup y delivery)")
         
         # Identificar nodos asignados
         assigned_nodes = set()
@@ -115,10 +132,11 @@ class JsonSolutionPresenter:
         for i, route_data in enumerate(raw_solution.get('routes', [])):
             vehicle_id = route_data.get('vehicle_id', '')
             route_nodes = route_data.get('route', [])
+            start_id, end_id = vehicle_depots.get(vehicle_id, (None, None))
             for pos, node in enumerate(route_nodes):
                 loc_id = node.get('location_id')
                 # Solo agregar nodos que no sean depósito
-                if loc_id and loc_id not in ['depot', 'deposit']:
+                if loc_id and (loc_id != start_id) and (loc_id != end_id):
                     node_to_vehiclepos[loc_id] = (vehicle_id, i, pos)
                     assigned_nodes.add(loc_id)
         # Validar cada par pickup-delivery (ya normalizado a IDs)
@@ -234,7 +252,7 @@ class JsonSolutionPresenter:
                 "route": nodes,
                 "breaks": route_data.get('breaks', []),
                 "node_names": node_names,
-                "total_distance": route_data.get('total_distance', 0),
+                "total_distance": route_data.get('distance', 0),
                 "weight_capacity": weight_capacity,
                 "max_weight": max_cumulative_weight,
                 "volume_capacity": volume_capacity,
@@ -250,10 +268,10 @@ class JsonSolutionPresenter:
         pd_ids = set([pid for pair in pd_pairs for pid in pair])
         for loc in locations:
             loc_id = loc.get('id')
-            loc_type = loc.get('type', '').lower()
             
-            # Excluir explícitamente depósitos
-            if loc_type in ['depot', 'deposit']:
+            # Excluir depósitos usando únicamente start/end definidos en vehículos
+            is_vehicle_depot = any(loc_id in (v.get('start_location_id'), v.get('end_location_id')) for v in vehicles)
+            if is_vehicle_depot:
                 continue
                 
             # Solo considerar nodos que no estén ya asignados
@@ -325,7 +343,12 @@ class JsonSolutionPresenter:
             current_volume = 0
             route_distance = 0
             route_breaks = []
+            # Start/End del vehículo de esta ruta
+            start_id, end_id = vehicle_depots.get(route.get('vehicle_id', ''), (None, None))
             
+            # Estado a bordo (solo para P&D) inicia en 0
+            onboard_weight = 0
+            onboard_volume = 0
             for node in route.get('route', []):
                 # Calcular tiempo de salida (llegada + tiempo de servicio)
                 arrival = node.get('arrival_time', 0)
@@ -334,15 +357,51 @@ class JsonSolutionPresenter:
                 
                 # Actualizar cargas y registrar nodo asignado
                 location_id = node.get('location_id')
-                if location_id and location_id not in ['depot', 'deposit']:
+                # Solo marcar como asignado si no es depósito (usar start/end del vehículo)
+                if location_id and (location_id != start_id) and (location_id != end_id):
                     assigned_nodes.add(location_id)
                 
+                # Calcular load_before, delta y load_after sin suposiciones
+                before_weight = current_weight
+                before_volume = current_volume
+                delta_weight = 0
+                delta_volume = 0
                 for loc in locations:
                     if loc.get('id') == location_id:
-                        current_weight += loc.get('weight_demand', 0)
-                        current_volume += loc.get('volume_demand', 0)
+                        delta_weight = loc.get('weight_demand', 0)
+                        delta_volume = loc.get('volume_demand', 0)
                         break
-                
+                after_weight = before_weight + delta_weight
+                after_volume = before_volume + delta_volume
+
+                # Actualizar acumulados
+                current_weight = after_weight
+                current_volume = after_volume
+
+                # Calcular a bordo SOLO para P&D
+                stop_extra = {}
+                if location_id and (location_id not in pd_ambiguous_ids):
+                    if location_id in pickup_ids or location_id in delivery_ids:
+                        role = 'pickup' if location_id in pickup_ids else 'delivery'
+                        # Usar magnitud positiva y asignar signo según rol
+                        dw = abs(delta_weight)
+                        dv = abs(delta_volume)
+                        signed_dw = dw if role == 'pickup' else -dw
+                        signed_dv = dv if role == 'pickup' else -dv
+                        ob_before_w = onboard_weight
+                        ob_before_v = onboard_volume
+                        ob_after_w = ob_before_w + signed_dw
+                        ob_after_v = ob_before_v + signed_dv
+                        # Actualizar estado a bordo
+                        onboard_weight = ob_after_w
+                        onboard_volume = ob_after_v
+                        stop_extra.update({
+                            "pd_role": role,
+                            "onboard_before": {"weight": ob_before_w, "volume": ob_before_v},
+                            "onboard_delta": {"weight": signed_dw, "volume": signed_dv},
+                            "onboard_after": {"weight": ob_after_w, "volume": ob_after_v}
+                        })
+
                 stops.append({
                     "location": {
                         "id": location_id,
@@ -352,15 +411,29 @@ class JsonSolutionPresenter:
                     },
                     "arrival": format_seconds(arrival),
                     "departure": format_seconds(departure),
+                    # 'load' mantiene compatibilidad y refleja el valor mostrado
                     "load": {
-                        "weight": current_weight,
-                        "volume": current_volume
-                    }
+                        "weight": after_weight,
+                        "volume": after_volume
+                    },
+                    # Detalle explícito de cargas por parada
+                    "load_before": {
+                        "weight": before_weight,
+                        "volume": before_volume
+                    },
+                    "load_delta": {
+                        "weight": delta_weight,
+                        "volume": delta_volume
+                    },
+                    "load_after": {
+                        "weight": after_weight,
+                        "volume": after_volume
+                    },
+                **stop_extra
                 })
                 
                 # Acumular estadísticas
                 total_stops += 1
-                route_distance = max(route_distance, node.get('distance', 0))
 
             # Formatear breaks (si existen)
             for b in route.get('breaks', []) or []:
@@ -376,11 +449,7 @@ class JsonSolutionPresenter:
                     continue
             
             # Ajuste de carga para depósito final: mostrar load_before (no sumar demanda del depósito)
-            end_location_id = None
-            for v in vehicles:
-                if v.get('id') == route.get('vehicle_id', ''):
-                    end_location_id = v.get('end_location_id')
-                    break
+            end_location_id = vehicle_depots.get(route.get('vehicle_id', ''), (None, None))[1]
             if stops and end_location_id and stops[-1]['location']['id'] == end_location_id:
                 depot_weight = 0
                 depot_volume = 0
@@ -391,29 +460,57 @@ class JsonSolutionPresenter:
                         break
                 stops[-1]['load']['weight'] = stops[-1]['load']['weight'] - depot_weight
                 stops[-1]['load']['volume'] = stops[-1]['load']['volume'] - depot_volume
+                # Mantener 'load' en el depósito final como load_before y ocultar delta/after para evitar ambigüedad
+                if 'load_before' in stops[-1]:
+                    stops[-1]['load']['weight'] = stops[-1]['load_before']['weight']
+                    stops[-1]['load']['volume'] = stops[-1]['load_before']['volume']
+                stops[-1].pop('load_delta', None)
+                stops[-1].pop('load_after', None)
             
             # Redondear cargas a 2 cifras significativas
             for s in stops:
                 s['load']['weight'] = _round_weight(s['load']['weight'])
                 s['load']['volume'] = _round_volume(s['load']['volume'])
+                if 'load_before' in s:
+                    s['load_before']['weight'] = _round_weight(s['load_before']['weight'])
+                    s['load_before']['volume'] = _round_volume(s['load_before']['volume'])
+                if 'load_delta' in s:
+                    s['load_delta']['weight'] = _round_weight(s['load_delta']['weight'])
+                    s['load_delta']['volume'] = _round_volume(s['load_delta']['volume'])
+                if 'load_after' in s:
+                    s['load_after']['weight'] = _round_weight(s['load_after']['weight'])
+                    s['load_after']['volume'] = _round_volume(s['load_after']['volume'])
+                if 'onboard_before' in s:
+                    s['onboard_before']['weight'] = _round_weight(s['onboard_before']['weight'])
+                    s['onboard_before']['volume'] = _round_volume(s['onboard_before']['volume'])
+                if 'onboard_delta' in s:
+                    s['onboard_delta']['weight'] = _round_weight(s['onboard_delta']['weight'])
+                    s['onboard_delta']['volume'] = _round_volume(s['onboard_delta']['volume'])
+                if 'onboard_after' in s:
+                    s['onboard_after']['weight'] = _round_weight(s['onboard_after']['weight'])
+                    s['onboard_after']['volume'] = _round_volume(s['onboard_after']['volume'])
             
             # Calcular duración y distancia total de la ruta
-            route_duration = 0
+            # Usar duración del solver si está disponible (en segundos)
+            route_duration = int(route.get('time', 0)) if isinstance(route.get('time', 0), (int, float)) else 0
             route_total_distance = 0
             
             # Si hay paradas, calcular duración y distancia
             if stops:
-                # Convertir HH:MM:SS a segundos para calcular la duración
-                start_time = sum(int(x) * 60 ** (2 - i) for i, x in enumerate(stops[0]['arrival'].split(":")))
-                end_time = sum(int(x) * 60 ** (2 - i) for i, x in enumerate(stops[-1]['departure'].split(":")))
-                route_duration = end_time - start_time
+                # Fallback: si no hay duración del solver, calcular desde las paradas
+                if route_duration <= 0:
+                    # Convertir HH:MM:SS a segundos para calcular la duración
+                    start_time = sum(int(x) * 60 ** (2 - i) for i, x in enumerate(stops[0]['arrival'].split(":")))
+                    end_time = sum(int(x) * 60 ** (2 - i) for i, x in enumerate(stops[-1]['departure'].split(":")))
+                    route_duration = end_time - start_time
                 
                 # Calcular distancia total sumando distancias entre nodos consecutivos
                 route_nodes = route.get('route', [])
-                route_total_distance = 0
-                
-                # Si la ruta tiene nodos con coordenadas, calcular distancias euclidianas
-                if len(route_nodes) > 1 and 'coords' in route_nodes[0]:
+                # Usar distancia precomputada del solver si existe
+                route_total_distance = route.get('total_distance', 0) or route.get('distance', 0)
+
+                # Si no hay valor, computar a partir de coords (aprox euclidiana)
+                if route_total_distance <= 0 and len(route_nodes) > 1 and 'coords' in route_nodes[0]:
                     import math
                     for i in range(len(route_nodes) - 1):
                         current = route_nodes[i]
@@ -428,7 +525,7 @@ class JsonSolutionPresenter:
                             dy = (to_lat - from_lat) * 111.32 * 1000
                             route_total_distance += math.sqrt(dx*dx + dy*dy)
                 
-                # Si no se pudo calcular la distancia, usar el valor del nodo
+                # Si aún no hay distancia, intentar con valores de nodos (si existieran)
                 if route_total_distance <= 0:
                     route_total_distance = max((node.get('distance', 0) for node in route_nodes if 'distance' in node), default=0)
             
@@ -456,8 +553,34 @@ class JsonSolutionPresenter:
             if route_breaks:
                 formatted_route["breaks"] = route_breaks
                 
+            # Filtrar rutas vacías: solo depósitos (sin clientes), usando start/end del vehículo
+            non_depot_stop_exists = any(
+                (s.get('location', {}).get('id') is not None)
+                and (s.get('location', {}).get('id') != start_id)
+                and (s.get('location', {}).get('id') != end_id)
+                for s in stops
+                if s.get('location') and 'id' in s['location']
+            )
+            if not non_depot_stop_exists:
+                # No incluir esta ruta; el vehículo se considerará 'unused'
+                continue
+            
             formatted_routes.append(formatted_route)
         
+        # Recalcular vehículos no usados con base en rutas no vacías
+        used_vehicle_ids = {r.get('vehicle', {}).get('id') for r in formatted_routes}
+        unused_vehicles = []
+        for v in vehicles:
+            v_id = v.get('id')
+            if v_id not in used_vehicle_ids:
+                unused_vehicles.append({
+                    "id": v_id,
+                    "name": v.get('name', v_id),
+                    "weight_capacity": v.get('weight_capacity', 0),
+                    "volume_capacity": v.get('volume_capacity', 0),
+                    "skills": v.get('skills', [])
+                })
+
         # Respuesta final mejorada
         return {
             "status": "success",
@@ -466,7 +589,7 @@ class JsonSolutionPresenter:
             "excluded_nodes": [],
             "used_cache": raw_solution.get('used_cache', False),
             "statistics": {
-                "vehicles_used": len([r for r in formatted_routes if r.get('stops', [])]),
+                "vehicles_used": len(formatted_routes),
                 "vehicles_available": len(vehicles),
                 "total_demand_weight": total_weight_demand,
                 "total_demand_volume": total_volume_demand,
